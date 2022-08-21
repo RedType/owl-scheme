@@ -52,9 +52,18 @@ where
   // for numerics
   let mut negative = false;
 
+  // help us enforce that either shift or unshift are called
+  // every iteration
+  let mut shifted = false;
+
   // iterate over all characters in input. only peek, because
   // some state transitions may not want to consume the character
   while let Some(&&ch) = chars.peek() {
+    // check shifted
+    assert!(shifted);
+    #[allow(unused_assignments)]
+    { shifted = false; }
+
     // update counters
     prev_line = line;
     prev_col = col;
@@ -75,12 +84,16 @@ where
 
     // consume current char
     macro_rules! shift {
-      () => { chars.next(); };
+      () => {
+        shifted = true;
+        chars.next();
+      };
     }
 
     // reset line info when ch is not consumed
     macro_rules! unshift {
       () => {
+        shifted = true;
         line = prev_line;
         col = prev_col;
         boundary_col = prev_boundary_col;
