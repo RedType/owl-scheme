@@ -1,4 +1,7 @@
-pub use error::{LexError, LexErrorKind};
+use std::str::FromStr;
+
+mod error;
+pub use self::error::{LexError, LexErrorKind};
 
 pub enum Lexeme {
   LParen,
@@ -12,13 +15,13 @@ pub enum Lexeme {
 }
 
 pub struct LexemeInfo {
-  lexeme: Lexeme,
-  line: u64,
-  col: u64,
-  boundary_col: u64, // last non-value column
+  pub lexeme: Lexeme,
+  pub line: u64,
+  pub col: u64,
+  pub boundary_col: u64, // last non-value column
 }
 
-#[derive(Copy)]
+#[derive(Clone, Copy)]
 enum State {
   Start,
   Comment,
@@ -45,7 +48,7 @@ where
   // for unshift
   let mut prev_line: u64;
   let mut prev_col: u64;
-  let mut prev_boundary_col: u64;
+  let mut prev_boundary_col = 0u64;
   // for numerics
   let mut negative = false;
 
@@ -61,7 +64,7 @@ where
         col = 0;
         boundary_col = 0;
       },
-      '(' | ')' | c if c.is_whitespace() => {
+      c @ '(' | c @ ')' | c if c.is_whitespace() => {
         col += 1;
         prev_boundary_col = boundary_col;
         boundary_col = col;
@@ -71,39 +74,51 @@ where
     }
 
     // consume current char
-    let shift = || chars.next();
+    macro_rules! shift {
+      () => { chars.next(); };
+    }
 
     // reset line info when ch is not consumed
-    let unshift = || {
-      line = prev_line;
-      col = prev_col;
-      boundary_col = prev_boundary_col;
-    };
+    macro_rules! unshift {
+      () => {
+        line = prev_line;
+        col = prev_col;
+        boundary_col = prev_boundary_col;
+      };
+    }
 
     // pushes a lexeme into the result list, along with all the metadata
-    let push_lex = |lexeme: Lexeme| infos.push(LexemeInfo {
-      lexeme,
-      line,
-      col,
-      boundary_col,
-    });
+    macro_rules! push_lex {
+      ($x:expr) => {
+        infos.push(LexemeInfo {
+          lexeme: $x,
+          line,
+          col,
+          boundary_col,
+        })
+      };
+    }
 
     // creates and wraps an error
-    let err = |error: LexErrorKind| Err(LexError {
-      error,
-      line,
-      col,
-      boundary_col,
-    });
+    macro_rules! err {
+      ($x:expr) => {
+        Err(LexError {
+          error: $x,
+          line,
+          col,
+          boundary_col,
+        })
+      };
+    }
 
     // execute state machine for this iteration
     match state {
       State::Start => {
         match ch {
           ';'  => state = State::Comment,
-          '('  => push_lex(Lexeme::LParen),
-          ')'  => push_lex(Lexeme::RParen),
-          '\'' => push_lex(Lexeme::Quote),
+          '('  => push_lex!(Lexeme::LParen),
+          ')'  => push_lex!(Lexeme::RParen),
+          '\'' => push_lex!(Lexeme::Quote),
           '"'  => state = State::String,
           '0'  => state = State::ZeroPrefixNumeric,
           '-'  => state = State::NegativeOrIdent,
@@ -113,7 +128,7 @@ where
             scratch_pad.push(c);
           },
           c if c.is_control() =>
-            return err(LexErrorKind::IllegalCharacter(c)),
+            return err!(LexErrorKind::IllegalCharacter(c)),
           c => {
             state = State::BoolOrIdent;
             scratch_pad.push(c);
@@ -121,7 +136,7 @@ where
         }
 
         // everything in this state consumes ch
-        shift();
+        shift!();
       },
 
       State::Comment => {
@@ -129,22 +144,22 @@ where
           state = State::Start;
         }
 
-        shift();
+        shift!();
       },
 
       State::BoolOrIdent => {
         if ch.is_alphanumeric() {
           scratch_pad.push(ch);
-          shift();
+          shift!();
         } else {
-          match scratch_pad {
-            "#t" | "#true"  => push_lex(Lexeme::Boolean(true)),
-            "#f" | "#false" => push_lex(Lexeme::Boolean(false)),
-            ident => push_lex(Lexeme::Identifier(ident)),
+          match scratch_pad.as_str() {
+            "#t" | "#true"  => push_lex!(Lexeme::Boolean(true)),
+            "#f" | "#false" => push_lex!(Lexeme::Boolean(false)),
+            _ => push_lex!(Lexeme::Identifier(scratch_pad)),
           }
           scratch_pad = String::new();
           state = State::Start;
-          unshift();
+          unshift!();
         }
       },
 
@@ -155,14 +170,14 @@ where
             todo!();
           },
           '"' => {
-            push_lex(Lexeme::String(scratch_pad));
+            push_lex!(Lexeme::String(scratch_pad));
             scratch_pad = String::new();
             state = State::Start;
           },
           c => scratch_pad.push(c),
         }
 
-        shift();
+        shift!();
       },
 
       State::NegativeOrIdent => {
@@ -182,7 +197,7 @@ where
           },
         }
 
-        shift();
+        shift!();
       },
 
       State::ZeroPrefixNumeric => {
@@ -197,101 +212,101 @@ where
             scratch_pad.push(c);
             state = State::Decimal;
           },
-          c if c.is_alphabetic() => return err(LexErrorKind::InvalidNumber),
+          c if c.is_alphabetic() => return err!(LexErrorKind::InvalidNumber),
           _ => {
             negative = false;
-            push_lex(Lexeme::Integer(0));
+            push_lex!(Lexeme::Integer(0));
             state = State::Start;
-            unshift();
+            unshift!();
             continue; // so we don't shift later
           },
         }
 
-        shift();
+        shift!();
       },
 
       State::Hexadecimal => {
         match ch {
-          '.' => return err(LexErrorKind::DotInNonDecimalNumeric),
-          '(' | ')' | c if c.is_whitespace() => {
+          '.' => return err!(LexErrorKind::DotInNonDecimalNumeric),
+          c @ '(' | c @ ')' | c if c.is_whitespace() => {
             if let Ok(n) = i64::from_str_radix(&scratch_pad, 16) {
               let final_n = if negative { -1 } else { 1 } * n;
-              push_lex(Lexeme::Integer(final_n));
+              push_lex!(Lexeme::Integer(final_n));
             } else {
-              return err(LexErrorKind::InvalidNumber);
+              return err!(LexErrorKind::InvalidNumber);
             }
 
             negative = false;
             scratch_pad = String::new();
             state = State::Start;
-            unshift();
+            unshift!();
             continue;
           },
           c if c.is_digit(16) => scratch_pad.push(ch),
-          _ => return err(LexErrorKind::NonHexCharInHex),
+          _ => return err!(LexErrorKind::NonHexCharInHex),
         }
 
-        shift();
+        shift!();
       },
 
       State::Binary => {
         match ch {
-          '.' => return err(LexErrorKind::DotInNonDecimalNumeric),
-          '(' | ')' | c if c.is_whitespace() => {
+          '.' => return err!(LexErrorKind::DotInNonDecimalNumeric),
+          c @ '(' | c @ ')' | c if c.is_whitespace() => {
             if let Ok(n) = i64::from_str_radix(&scratch_pad, 2) {
               let final_n = if negative { -1 } else { 1 } * n;
-              push_lex(Lexeme::Integer(final_n));
+              push_lex!(Lexeme::Integer(final_n));
             } else {
-              return err(LexErrorKind::InvalidNumber);
+              return err!(LexErrorKind::InvalidNumber);
             }
 
             negative = false;
             scratch_pad = String::new();
             state = State::Start;
-            unshift();
+            unshift!();
             continue;
           },
           c if c.is_digit(2) => scratch_pad.push(ch),
-          _ => return err(LexErrorKind::NonBinCharInBin),
+          _ => return err!(LexErrorKind::NonBinCharInBin),
         }
 
-        shift();
+        shift!();
       },
 
       State::Decimal => {
         match ch {
-          '(' | ')' | c if c.is_whitespace() => {
+          c @ '(' | c @ ')' | c if c.is_whitespace() => {
             // do conversion
             if scratch_pad.contains('.') {
               // if there's a . then it's a float
               if let Ok(n) = f64::from_str(&scratch_pad) {
                 let final_n = if negative { -1.0 } else { 1.0 } * n;
-                push_lex(Lexeme::Float(final_n));
+                push_lex!(Lexeme::Float(final_n));
               } else {
-                return err(LexErrorKind::InvalidNumber);
+                return err!(LexErrorKind::InvalidNumber);
               }
             } else {
               // if there's no . then it's an integer
               if let Ok(n) = i64::from_str_radix(&scratch_pad, 10) {
                 let final_n = if negative { -1 } else { 1 } * n;
-                push_lex(Lexeme::Integer(final_n));
+                push_lex!(Lexeme::Integer(final_n));
               } else {
-                return err(LexErrorKind::InvalidNumber);
+                return err!(LexErrorKind::InvalidNumber);
               }
             }
 
             negative = false;
             scratch_pad = String::new();
             state = State::Start;
-            unshift();
+            unshift!();
             continue;
           },
           '.' => scratch_pad.push('.'),
           c if c.is_digit(10) => scratch_pad.push(c),
-          _ => return err(LexErrorKind::NonDecCharInDec),
+          _ => return err!(LexErrorKind::NonDecCharInDec),
         }
 
-        shift();
+        shift!();
       },
     }
   }
