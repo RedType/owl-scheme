@@ -354,6 +354,7 @@ where
 #[cfg(test)]
 mod tests {
   use super::*;
+  use super::error::LexErrorKind::*;
 
   macro_rules! lex_str {
     ($s:expr) => {
@@ -362,6 +363,13 @@ mod tests {
         .into_iter()
         .map(|li| li.lexeme)
         .collect::<Vec<_>>()
+    };
+  }
+
+  macro_rules! lex_err {
+    ($s:expr) => {
+      lex($s.chars())
+        .unwrap_err()
     };
   }
 
@@ -422,6 +430,7 @@ mod tests {
     let actual_pound = lex_str!("#");
     assert_eq!(expected_pound, actual_pound);
 
+    // should these produce an error?
     let expected_fake_true = vec![Lexeme::Identifier("#tr".into())];
     let actual_fake_true = lex_str!("#tr");
     assert_eq!(expected_fake_true, actual_fake_true);
@@ -475,6 +484,16 @@ mod tests {
       expected_zero_prefix_negative_int,
       actual_zero_prefix_negative_int,
     );
+  }
+
+  #[test]
+  fn lexeme_integer_from_hexadecimal() {
+    let expected_hex = vec![Lexeme::Integer(255)];
+    let actual_hex = lex_str!("0xff");
+    assert_eq!(expected_hex, actual_hex);
+
+    let not_hex = lex_err!("0x");
+    assert_eq!(InvalidNumber, not_hex.error);
   }
 }
 
