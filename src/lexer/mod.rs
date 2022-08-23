@@ -51,6 +51,7 @@ enum State {
   String,
   NegativeOrIdent,
   ZeroPrefixNumeric, // for non-decimal literals
+  FloatOrDotIdent,
   Hexadecimal,
   Decimal,
   Binary,
@@ -158,6 +159,10 @@ where
           '"'  => state = State::String,
           '0'  => state = State::ZeroPrefixNumeric,
           '-'  => state = State::NegativeOrIdent,
+          '.'  => {
+            scratch_pad.push('.');
+            state = State::FloatOrDotIdent;
+          }
           c if c.is_whitespace() => {},
           c if c.is_digit(10) => {
             state = State::Decimal;
@@ -249,7 +254,8 @@ where
             scratch_pad.push(c);
             state = State::Decimal;
           },
-          c if c.is_alphabetic() => return err!(LexErrorKind::InvalidNumber),
+          c if c.is_alphabetic() =>
+            return err!(LexErrorKind::InvalidNumber),
           _ => {
             negative = false;
             push_lex!(Lexeme::Integer(0));
@@ -262,9 +268,21 @@ where
         shift!();
       },
 
+      State::FloatOrDotIdent => {
+        scratch_pad.push(ch);
+        state = if ch.is_numeric() {
+          State::Decimal
+        } else {
+          State::BoolOrIdent
+        };
+
+        shift!();
+      },
+
       State::Hexadecimal => {
         match ch {
           '.' => return err!(LexErrorKind::DotInNonDecimalNumeric),
+          '_' => (),
           c @ '(' | c @ ')' | c if c.is_whitespace() => {
             if let Ok(n) = i64::from_str_radix(&scratch_pad, 16) {
               let final_n = if negative { -1 } else { 1 } * n;
@@ -289,6 +307,7 @@ where
       State::Binary => {
         match ch {
           '.' => return err!(LexErrorKind::DotInNonDecimalNumeric),
+          '_' => (),
           c @ '(' | c @ ')' | c if c.is_whitespace() => {
             if let Ok(n) = i64::from_str_radix(&scratch_pad, 2) {
               let final_n = if negative { -1 } else { 1 } * n;
@@ -311,39 +330,42 @@ where
       },
 
       State::Decimal => {
+        let mut do_conversion = false;
         match ch {
-          c @ '(' | c @ ')' | c if c.is_whitespace() => {
-            // do conversion
-            if scratch_pad.contains('.') {
-              // if there's a . then it's a float
-              if let Ok(n) = f64::from_str(&scratch_pad) {
-                let final_n = if negative { -1.0 } else { 1.0 } * n;
-                push_lex!(Lexeme::Float(final_n));
-              } else {
-                return err!(LexErrorKind::InvalidNumber);
-              }
-            } else {
-              // if there's no . then it's an integer
-              if let Ok(n) = i64::from_str_radix(&scratch_pad, 10) {
-                let final_n = if negative { -1 } else { 1 } * n;
-                push_lex!(Lexeme::Integer(final_n));
-              } else {
-                return err!(LexErrorKind::InvalidNumber);
-              }
-            }
-
-            negative = false;
-            scratch_pad = String::new();
-            state = State::Start;
-            unshift!();
-            continue;
-          },
+          '_' => (),
           '.' => scratch_pad.push('.'),
+          '(' | ')' => do_conversion = true,
+          c if c.is_whitespace() => do_conversion = true,
           c if c.is_digit(10) => scratch_pad.push(c),
           _ => return err!(LexErrorKind::NonDecCharInDec),
         }
 
-        shift!();
+        if do_conversion {
+          if scratch_pad.contains('.') {
+            // if there's a . then it's a float
+            if let Ok(n) = f64::from_str(&scratch_pad) {
+              let final_n = if negative { -1.0 } else { 1.0 } * n;
+              push_lex!(Lexeme::Float(final_n));
+            } else {
+              return err!(LexErrorKind::InvalidNumber);
+            }
+          } else {
+            // if there's no . then it's an integer
+            if let Ok(n) = i64::from_str_radix(&scratch_pad, 10) {
+              let final_n = if negative { -1 } else { 1 } * n;
+              push_lex!(Lexeme::Integer(final_n));
+            } else {
+              return err!(LexErrorKind::InvalidNumber);
+            }
+          }
+
+          negative = false;
+          scratch_pad = String::new();
+          state = State::Start;
+          unshift!();
+        } else {
+          shift!();
+        }
       },
     }
   }
@@ -430,6 +452,14 @@ mod tests {
     let actual_pound = lex_str!("#");
     assert_eq!(expected_pound, actual_pound);
 
+    let expected_dot_prefix = vec![Lexeme::Identifier(".e".into())];
+    let actual_dot_prefix = lex_str!(".e");
+    assert_eq!(expected_dot_prefix, actual_dot_prefix);
+
+    let expected_ident_with_number = vec![Lexeme::Identifier(":3".into())];
+    let actual_ident_with_number = lex_str!(":3");
+    assert_eq!(expected_ident_with_number, actual_ident_with_number);
+
     // should these produce an error?
     let expected_fake_true = vec![Lexeme::Identifier("#tr".into())];
     let actual_fake_true = lex_str!("#tr");
@@ -484,6 +514,13 @@ mod tests {
       expected_zero_prefix_negative_int,
       actual_zero_prefix_negative_int,
     );
+
+    let expected_underscored_int = vec![Lexeme::Integer(1_000_000)];
+    let actual_underscored_int = lex_str!("1_000_000");
+    assert_eq!(expected_underscored_int, actual_underscored_int);
+
+    let illegal_decimal = lex_err!("35a7");
+    assert_eq!(NonDecCharInDec, illegal_decimal.error);
   }
 
   #[test]
@@ -492,8 +529,113 @@ mod tests {
     let actual_hex = lex_str!("0xff");
     assert_eq!(expected_hex, actual_hex);
 
+    let actual_underscored_hex = lex_str!("0xf_f");
+    assert_eq!(expected_hex, actual_underscored_hex);
+
     let not_hex = lex_err!("0x");
     assert_eq!(InvalidNumber, not_hex.error);
+
+    let illegal_hex = lex_err!("0xg");
+    assert_eq!(NonHexCharInHex, illegal_hex.error);
+  }
+
+  #[test]
+  fn lexeme_integer_from_binary() {
+    let expected_bin = vec![Lexeme::Integer(6)];
+    let actual_bin = lex_str!("0b0110");
+    assert_eq!(expected_bin, actual_bin);
+
+    let actual_underscored_bin = lex_str!("0b0000_0110");
+    assert_eq!(expected_bin, actual_underscored_bin);
+
+    let not_bin = lex_err!("0b");
+    assert_eq!(InvalidNumber, not_bin.error);
+
+    let illegal_bin = lex_err!("0b37");
+    assert_eq!(NonBinCharInBin, illegal_bin.error);
+  }
+
+  #[test]
+  fn lexeme_float() {
+    let expected_float = vec![Lexeme::Float(0.5)];
+    let actual_float = lex_str!("0.5");
+    assert_eq!(expected_float, actual_float);
+
+    let actual_float_dot_prefix = lex_str!(".5");
+    assert_eq!(expected_float, actual_float_dot_prefix);
+
+    let expected_float_dot_postfix = vec![Lexeme::Float(5.0)];
+    let actual_float_dot_postfix = lex_str!("5.");
+    assert_eq!(expected_float_dot_postfix, actual_float_dot_postfix);
+
+    let not_float = lex_err!("0.3.4");
+    assert_eq!(InvalidNumber, not_float.error);
+  }
+
+  #[test]
+  fn list_of_everything() {
+    let expected_list = vec![
+      Lexeme::Quote,
+      Lexeme::LParen,
+      Lexeme::Identifier("print".into()),
+      Lexeme::Boolean(false),
+      Lexeme::String("hello!!".into()),
+      Lexeme::Integer(255),
+      Lexeme::Float(10.0),
+      Lexeme::RParen,
+    ];
+    let actual_list = lex_str!("'(print #f \"hello!!\" 0xff 10.)");
+    assert_eq!(expected_list, actual_list);
+  }
+
+  #[test]
+  fn list_of_anything() {
+    let expected_nil = vec![
+      Lexeme::LParen,
+      Lexeme::RParen,
+    ];
+    let actual_nil = lex_str!("()");
+    assert_eq!(expected_nil, actual_nil);
+
+    let expected_ident = vec![
+      Lexeme::LParen,
+      Lexeme::Identifier("uwu".into()),
+      Lexeme::RParen,
+    ];
+    let actual_ident = lex_str!("(uwu)");
+    assert_eq!(expected_ident, actual_ident);
+
+    let expected_bool = vec![
+      Lexeme::LParen,
+      Lexeme::Boolean(true),
+      Lexeme::RParen,
+    ];
+    let actual_bool = lex_str!("(#t)");
+    assert_eq!(expected_bool, actual_bool);
+
+    let expected_str = vec![
+      Lexeme::LParen,
+      Lexeme::String("owo".into()),
+      Lexeme::RParen,
+    ];
+    let actual_str = lex_str!("(\"owo\")");
+    assert_eq!(expected_str, actual_str);
+
+    let expected_int = vec![
+      Lexeme::LParen,
+      Lexeme::Integer(300),
+      Lexeme::RParen,
+    ];
+    let actual_int = lex_str!("(300)");
+    assert_eq!(expected_int, actual_int);
+
+    let expected_float = vec![
+      Lexeme::LParen,
+      Lexeme::Float(0.15),
+      Lexeme::RParen,
+    ];
+    let actual_float = lex_str!("(.15)");
+    assert_eq!(expected_float, actual_float);
   }
 }
 
