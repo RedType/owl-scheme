@@ -1,3 +1,4 @@
+#[derive(Debug)]
 pub enum LexErrorKind {
   DotInNonDecimalNumeric,
   IllegalCharacter(char),
@@ -7,6 +8,7 @@ pub enum LexErrorKind {
   NonHexCharInHex,
 }
 
+#[derive(Debug)]
 pub struct LexError {
   pub error: LexErrorKind,
   pub line: u64,
