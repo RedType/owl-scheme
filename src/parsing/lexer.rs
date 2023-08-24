@@ -1,7 +1,6 @@
 use std::str::FromStr;
 
-mod error;
-pub use self::error::{LexError, LexErrorKind};
+use super::{Info, LexError, LexErrorKind};
 
 #[derive(Debug)]
 pub enum Lexeme {
@@ -36,14 +35,7 @@ impl PartialEq<Lexeme> for Lexeme {
 impl Eq for Lexeme {}
 
 #[derive(Debug)]
-pub struct LexemeInfo {
-  pub line: u64,
-  pub col: u64,
-  pub boundary_col: u64, // last non-value column
-}
-
-#[derive(Debug)]
-pub struct LexItem(pub Lexeme, pub LexemeInfo);
+pub struct LexItem(pub Lexeme, pub Info);
 
 #[derive(Clone, Copy)]
 enum State {
@@ -129,7 +121,7 @@ where
     // pushes a lexeme into the result list, along with all the metadata
     macro_rules! push_lex {
       ($x:expr) => {
-        items.push(LexItem($x, LexemeInfo {
+        items.push(LexItem($x, Info {
           line,
           col,
           boundary_col,
@@ -140,7 +132,7 @@ where
     // creates and wraps an error
     macro_rules! err {
       ($x:expr) => {
-        Err(LexError($x, LexemeInfo {
+        Err(LexError($x, Info {
           line,
           col,
           boundary_col,
@@ -376,7 +368,7 @@ where
 #[cfg(test)]
 mod tests {
   use super::*;
-  use super::error::LexErrorKind::*;
+  use crate::parsing::LexErrorKind::*;
 
   macro_rules! lex_str {
     ($s:expr) => {
