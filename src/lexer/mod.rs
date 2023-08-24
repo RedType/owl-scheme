@@ -37,11 +37,13 @@ impl Eq for Lexeme {}
 
 #[derive(Debug)]
 pub struct LexemeInfo {
-  pub lexeme: Lexeme,
   pub line: u64,
   pub col: u64,
   pub boundary_col: u64, // last non-value column
 }
+
+#[derive(Debug)]
+pub struct LexItem(pub Lexeme, pub LexemeInfo);
 
 #[derive(Clone, Copy)]
 enum State {
@@ -57,11 +59,11 @@ enum State {
   Binary,
 }
 
-pub fn lex<I>(source: I) -> Result<Vec<LexemeInfo>, LexError>
+pub fn lex<I>(source: I) -> Result<Vec<LexItem>, LexError>
 where
   I: IntoIterator<Item = char>,
 {
-  let mut infos = Vec::new();
+  let mut items = Vec::new();
   let mut state = State::Start;
   // append a " " to end of input so that lexer can finish up
   let mut chars = source.into_iter().chain(" ".chars()).peekable();
@@ -127,24 +129,22 @@ where
     // pushes a lexeme into the result list, along with all the metadata
     macro_rules! push_lex {
       ($x:expr) => {
-        infos.push(LexemeInfo {
-          lexeme: $x,
+        items.push(LexItem($x, LexemeInfo {
           line,
           col,
           boundary_col,
-        })
+        }))
       };
     }
 
     // creates and wraps an error
     macro_rules! err {
       ($x:expr) => {
-        Err(LexError {
-          error: $x,
+        Err(LexError($x, LexemeInfo {
           line,
           col,
           boundary_col,
-        })
+        }))
       };
     }
 
@@ -370,7 +370,7 @@ where
     }
   }
 
-  Ok(infos)
+  Ok(items)
 }
 
 #[cfg(test)]
@@ -383,7 +383,7 @@ mod tests {
       lex($s.chars())
         .unwrap()
         .into_iter()
-        .map(|li| li.lexeme)
+        .map(|li| li.0)
         .collect::<Vec<_>>()
     };
   }
@@ -520,7 +520,7 @@ mod tests {
     assert_eq!(expected_underscored_int, actual_underscored_int);
 
     let illegal_decimal = lex_err!("35a7");
-    assert_eq!(NonDecCharInDec, illegal_decimal.error);
+    assert_eq!(NonDecCharInDec, illegal_decimal.0);
   }
 
   #[test]
@@ -533,10 +533,10 @@ mod tests {
     assert_eq!(expected_hex, actual_underscored_hex);
 
     let not_hex = lex_err!("0x");
-    assert_eq!(InvalidNumber, not_hex.error);
+    assert_eq!(InvalidNumber, not_hex.0);
 
     let illegal_hex = lex_err!("0xg");
-    assert_eq!(NonHexCharInHex, illegal_hex.error);
+    assert_eq!(NonHexCharInHex, illegal_hex.0);
   }
 
   #[test]
@@ -549,10 +549,10 @@ mod tests {
     assert_eq!(expected_bin, actual_underscored_bin);
 
     let not_bin = lex_err!("0b");
-    assert_eq!(InvalidNumber, not_bin.error);
+    assert_eq!(InvalidNumber, not_bin.0);
 
     let illegal_bin = lex_err!("0b37");
-    assert_eq!(NonBinCharInBin, illegal_bin.error);
+    assert_eq!(NonBinCharInBin, illegal_bin.0);
   }
 
   #[test]
@@ -569,7 +569,7 @@ mod tests {
     assert_eq!(expected_float_dot_postfix, actual_float_dot_postfix);
 
     let not_float = lex_err!("0.3.4");
-    assert_eq!(InvalidNumber, not_float.error);
+    assert_eq!(InvalidNumber, not_float.0);
   }
 
   #[test]

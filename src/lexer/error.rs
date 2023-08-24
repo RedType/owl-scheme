@@ -1,3 +1,5 @@
+use super::LexemeInfo;
+
 #[derive(Debug, PartialEq)]
 pub enum LexErrorKind {
   DotInNonDecimalNumeric,
@@ -9,10 +11,5 @@ pub enum LexErrorKind {
 }
 
 #[derive(Debug)]
-pub struct LexError {
-  pub error: LexErrorKind,
-  pub line: u64,
-  pub col: u64,
-  pub boundary_col: u64, // last non-value column
-}
+pub struct LexError(pub LexErrorKind, pub LexemeInfo);
 
