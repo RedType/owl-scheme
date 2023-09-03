@@ -12,7 +12,10 @@ pub enum LexErrorKind {
 
 #[derive(Debug, PartialEq)]
 pub enum ParseErrorKind {
-  Dummy
+  MismatchedLParen,
+  MismatchedRParen,
+  OrphanedLexeme,
+  QuotedRParen,
 }
 
 #[derive(Debug)]

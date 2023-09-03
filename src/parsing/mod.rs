@@ -16,7 +16,7 @@ pub use self::{
   },
 };
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Info {
   pub line: u64,
   pub col: u64,
