@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use crate::{
   data::{Data, SymbolTable},
-  parsing::{Info, LexError, LexErrorKind},
+  parsing::{Info, ParseError, ParseErrorKind},
 };
 
 #[derive(Debug)]
@@ -53,7 +53,7 @@ enum State {
   Binary,
 }
 
-pub fn lex<I>(source: I) -> Result<(Vec<LexItem>, SymbolTable), LexError>
+pub fn lex<I>(source: I) -> Result<(Vec<LexItem>, SymbolTable), ParseError>
 where
   I: IntoIterator<Item = char>,
 {
@@ -135,7 +135,7 @@ where
     // creates and wraps an error
     macro_rules! err {
       ($x:expr) => {
-        Err(LexError($x, Info {
+        Err(ParseError($x, Info {
           line,
           col,
           boundary_col,
@@ -164,7 +164,7 @@ where
             scratch_pad.push(c);
           },
           c if c.is_control() =>
-            return err!(LexErrorKind::IllegalCharacter(c)),
+            return err!(ParseErrorKind::IllegalCharacter(c)),
           c => {
             state = State::BoolOrIdent;
             scratch_pad.push(c);
@@ -250,7 +250,7 @@ where
             state = State::Decimal;
           },
           c if c.is_alphabetic() =>
-            return err!(LexErrorKind::InvalidNumber),
+            return err!(ParseErrorKind::InvalidNumber),
           _ => {
             negative = false;
             push_lex!(Lexeme::Integer(0));
@@ -276,14 +276,14 @@ where
 
       State::Hexadecimal => {
         match ch {
-          '.' => return err!(LexErrorKind::DotInNonDecimalNumeric),
+          '.' => return err!(ParseErrorKind::DotInNonDecimalNumeric),
           '_' => (),
           c @ '(' | c @ ')' | c if c.is_whitespace() => {
             if let Ok(n) = i64::from_str_radix(&scratch_pad, 16) {
               let final_n = if negative { -1 } else { 1 } * n;
               push_lex!(Lexeme::Integer(final_n));
             } else {
-              return err!(LexErrorKind::InvalidNumber);
+              return err!(ParseErrorKind::InvalidNumber);
             }
 
             negative = false;
@@ -293,7 +293,7 @@ where
             continue;
           },
           c if c.is_digit(16) => scratch_pad.push(ch),
-          _ => return err!(LexErrorKind::NonHexCharInHex),
+          _ => return err!(ParseErrorKind::NonHexCharInHex),
         }
 
         shift!();
@@ -301,14 +301,14 @@ where
 
       State::Binary => {
         match ch {
-          '.' => return err!(LexErrorKind::DotInNonDecimalNumeric),
+          '.' => return err!(ParseErrorKind::DotInNonDecimalNumeric),
           '_' => (),
           c @ '(' | c @ ')' | c if c.is_whitespace() => {
             if let Ok(n) = i64::from_str_radix(&scratch_pad, 2) {
               let final_n = if negative { -1 } else { 1 } * n;
               push_lex!(Lexeme::Integer(final_n));
             } else {
-              return err!(LexErrorKind::InvalidNumber);
+              return err!(ParseErrorKind::InvalidNumber);
             }
 
             negative = false;
@@ -318,7 +318,7 @@ where
             continue;
           },
           c if c.is_digit(2) => scratch_pad.push(ch),
-          _ => return err!(LexErrorKind::NonBinCharInBin),
+          _ => return err!(ParseErrorKind::NonBinCharInBin),
         }
 
         shift!();
@@ -332,7 +332,7 @@ where
           '(' | ')' => do_conversion = true,
           c if c.is_whitespace() => do_conversion = true,
           c if c.is_digit(10) => scratch_pad.push(c),
-          _ => return err!(LexErrorKind::NonDecCharInDec),
+          _ => return err!(ParseErrorKind::NonDecCharInDec),
         }
 
         if do_conversion {
@@ -342,7 +342,7 @@ where
               let final_n = if negative { -1.0 } else { 1.0 } * n;
               push_lex!(Lexeme::Float(final_n));
             } else {
-              return err!(LexErrorKind::InvalidNumber);
+              return err!(ParseErrorKind::InvalidNumber);
             }
           } else {
             // if there's no . then it's an integer
@@ -350,7 +350,7 @@ where
               let final_n = if negative { -1 } else { 1 } * n;
               push_lex!(Lexeme::Integer(final_n));
             } else {
-              return err!(LexErrorKind::InvalidNumber);
+              return err!(ParseErrorKind::InvalidNumber);
             }
           }
 
@@ -371,7 +371,7 @@ where
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::parsing::LexErrorKind::*;
+  use crate::parsing::ParseErrorKind::*;
 
   macro_rules! lex_str {
     ($s:expr) => {{
