@@ -105,6 +105,37 @@ impl IdTable {
 mod tests {
   use super::*;
 
+  #[test]
+  fn display() {
+    use Data::*;
+
+    let mut table = IdTable::new();
+    let symbol = table.add("jeremy");
+    assert_eq!(symbol.to_string(), "jeremy");
+
+    let string = String("upright bass".to_owned());
+    assert_eq!(string.to_string(), "\"upright bass\"");
+
+    let tru = Boolean(true);
+    let fals = Boolean(false);
+    assert_eq!(tru.to_string(), "#true");
+    assert_eq!(fals.to_string(), "#false");
+
+    let int = Integer(35);
+    assert_eq!(int.to_string(), "35");
+
+    let float = Float(123.4);
+    assert_eq!(float.to_string(), "123.4");
+
+    let list = List(
+      [symbol, string, tru, fals, int, float]
+        .into_iter()
+        .map(Rc::new)
+        .collect::<Vec<_>>()
+    );
+    assert_eq!(list.to_string(), "(jeremy \"upright bass\" #true #false 35 123.4)");
+  }
+
   macro_rules! unsym {
     ($sym:expr) => {
       if let Data::Symbol(id, ref name) = $sym {
@@ -114,7 +145,6 @@ mod tests {
       }
     }
   }
-
 
   #[test]
   fn table_add() {
