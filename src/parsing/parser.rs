@@ -39,7 +39,7 @@ fn parse_rec<I: Iterator<Item = LexItem>>(
   symbols: &mut SymbolTable,
 ) -> Result<Data, ParseError> {
   let data = match lexemes.next() {
-    Some(LexItem(Lexeme::Identifier(x), _)) => symbols.add(&x),
+    Some(LexItem(Lexeme::Symbol(x), _)) => x,
     Some(LexItem(Lexeme::Boolean(x), _)) => Data::Boolean(x),
     Some(LexItem(Lexeme::String(x), _)) => Data::String(x),
     Some(LexItem(Lexeme::Integer(x), _)) => Data::Integer(x),
@@ -63,19 +63,18 @@ fn parse_rec<I: Iterator<Item = LexItem>>(
   Ok(data)
 }
 
-pub fn parse<I>(sequence: I) -> Result<(Vec<Data>, SymbolTable), ParseError>
+pub fn parse<I>(sequence: I, symbols: &mut SymbolTable) -> Result<Vec<Data>, ParseError>
 where
   I: IntoIterator<Item = LexItem>,
 {
   let mut lexemes = sequence.into_iter().peekable();
-  let mut symbols = SymbolTable::new();
   let mut data = Vec::new();
 
   while let Some(_) = lexemes.peek() {
-    data.push(parse_rec(&mut lexemes, &mut symbols)?);
+    data.push(parse_rec(&mut lexemes, symbols)?);
   }
 
-  Ok((data, symbols))
+  Ok(data)
 }
 
 #[cfg(test)]
@@ -90,8 +89,9 @@ mod tests {
 
   #[test]
   fn parse_empty() {
-    let result = parse([]);
-    assert!(result.unwrap().0.is_empty());
+    let mut symbols = SymbolTable::new();
+    let result = parse([], &mut symbols);
+    assert!(result.unwrap().is_empty());
   }
 }
 

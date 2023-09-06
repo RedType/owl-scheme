@@ -1,20 +1,22 @@
 use std::str::FromStr;
 
-use super::{Info, LexError, LexErrorKind};
+use crate::{
+  data::{Data, SymbolTable},
+  parsing::{Info, LexError, LexErrorKind},
+};
 
 #[derive(Debug)]
 pub enum Lexeme {
   LParen,
   RParen,
   Quote,
-  Identifier(String),
+  Symbol(Data),
   Boolean(bool),
   String(String),
   Integer(i64),
   Float(f64),
 }
 
-const CLOSE_ENOUGH: f64 = 0.00000000001;
 impl PartialEq<Lexeme> for Lexeme {
   fn eq(&self, other: &Lexeme) -> bool {
     use Lexeme::*;
@@ -23,11 +25,11 @@ impl PartialEq<Lexeme> for Lexeme {
       (LParen, LParen) => true,
       (RParen, RParen) => true,
       (Quote, Quote) => true,
-      (Identifier(a), Identifier(b)) => a == b,
+      (Symbol(a), Symbol(b)) => a == b, // fwd to the Data implementation
       (Boolean(a), Boolean(b)) => a == b,
       (String(a), String(b)) => a == b,
       (Integer(a), Integer(b)) => a == b,
-      (Float(a), Float(b)) => (a - b).abs() < CLOSE_ENOUGH,
+      (Float(a), Float(b)) => a == b, // you should know better
       _ => false,
     }
   }
@@ -51,11 +53,12 @@ enum State {
   Binary,
 }
 
-pub fn lex<I>(source: I) -> Result<Vec<LexItem>, LexError>
+pub fn lex<I>(source: I) -> Result<(Vec<LexItem>, SymbolTable), LexError>
 where
   I: IntoIterator<Item = char>,
 {
   let mut items = Vec::new();
+  let mut symbols = SymbolTable::new();
   let mut state = State::Start;
   // append a " " to end of input so that lexer can finish up
   let mut chars = source.into_iter().chain(" ".chars()).peekable();
@@ -188,7 +191,7 @@ where
           match scratch_pad.as_str() {
             "#t" | "#true"  => push_lex!(Lexeme::Boolean(true)),
             "#f" | "#false" => push_lex!(Lexeme::Boolean(false)),
-            _ => push_lex!(Lexeme::Identifier(scratch_pad)),
+            _ => push_lex!(Lexeme::Symbol(symbols.add(&scratch_pad))),
           }
           scratch_pad = String::new();
           state = State::Start;
@@ -362,7 +365,7 @@ where
     }
   }
 
-  Ok(items)
+  Ok((items, symbols))
 }
 
 #[cfg(test)]
@@ -371,144 +374,144 @@ mod tests {
   use crate::parsing::LexErrorKind::*;
 
   macro_rules! lex_str {
-    ($s:expr) => {
-      lex($s.chars())
-        .unwrap()
+    ($s:expr) => {{
+      let (infos, syms) = lex($s.chars()).unwrap();
+      let lexs = infos
         .into_iter()
         .map(|li| li.0)
-        .collect::<Vec<_>>()
-    };
+        .collect::<Vec<_>>();
+      (lexs, syms)
+    }};
   }
 
   macro_rules! lex_err {
     ($s:expr) => {
-      lex($s.chars())
-        .unwrap_err()
+      lex($s.chars()).unwrap_err()
     };
   }
 
   #[test]
   fn empty_string_produces_no_lexemes() {
     let expected: Vec<Lexeme> = Vec::new();
-    let actual = lex_str!("");
+    let (actual, _) = lex_str!("");
     assert_eq!(expected, actual);
   }
 
   #[test]
   fn lexeme_lparen() {
     let expected = vec![Lexeme::LParen];
-    let actual = lex_str!("(");
+    let (actual, _) = lex_str!("(");
     assert_eq!(expected, actual);
 
     let expected_double = vec![Lexeme::LParen, Lexeme::LParen];
-    let actual_double = lex_str!("((");
+    let (actual_double, _) = lex_str!("((");
     assert_eq!(expected_double, actual_double);
   }
 
   #[test]
   fn lexeme_rparen() {
     let expected = vec![Lexeme::RParen];
-    let actual = lex_str!(")");
+    let (actual, _) = lex_str!(")");
     assert_eq!(expected, actual);
 
     let expected_double = vec![Lexeme::RParen, Lexeme::RParen];
-    let actual_double = lex_str!("))");
+    let (actual_double, _) = lex_str!("))");
     assert_eq!(expected_double, actual_double);
   }
 
   #[test]
   fn lexeme_quote() {
     let expected = vec![Lexeme::Quote];
-    let actual = lex_str!("'");
+    let (actual, _) = lex_str!("'");
     assert_eq!(expected, actual);
 
     let expected_double = vec![Lexeme::Quote, Lexeme::Quote];
-    let actual_double = lex_str!("''");
+    let (actual_double, _) = lex_str!("''");
     assert_eq!(expected_double, actual_double);
   }
 
   #[test]
-  fn lexeme_identifier() {
-    let expected = vec![Lexeme::Identifier("test".into())];
-    let actual = lex_str!("test");
+  fn lexeme_symbol() {
+    let (actual, symbols) = lex_str!("test");
+    let expected = vec![Lexeme::Symbol(symbols.get("test").unwrap())];
     assert_eq!(expected, actual);
 
+    let (actual_double, symbols_double) = lex_str!("test toast");
     let expected_double = vec![
-      Lexeme::Identifier("test".into()),
-      Lexeme::Identifier("toast".into()),
+      Lexeme::Symbol(symbols_double.get("test").unwrap()),
+      Lexeme::Symbol(symbols_double.get("toast").unwrap()),
     ];
-    let actual_double = lex_str!("test toast");
     assert_eq!(expected_double, actual_double);
 
-    let expected_pound = vec![Lexeme::Identifier("#".into())];
-    let actual_pound = lex_str!("#");
+    let (actual_pound, symbols_pound) = lex_str!("#");
+    let expected_pound = vec![Lexeme::Symbol(symbols_pound.get("#").unwrap())];
     assert_eq!(expected_pound, actual_pound);
 
-    let expected_dot_prefix = vec![Lexeme::Identifier(".e".into())];
-    let actual_dot_prefix = lex_str!(".e");
+    let (actual_dot_prefix, symbols_dot_prefix) = lex_str!(".e");
+    let expected_dot_prefix = vec![Lexeme::Symbol(symbols_dot_prefix.get(".e").unwrap())];
     assert_eq!(expected_dot_prefix, actual_dot_prefix);
 
-    let expected_ident_with_number = vec![Lexeme::Identifier(":3".into())];
-    let actual_ident_with_number = lex_str!(":3");
-    assert_eq!(expected_ident_with_number, actual_ident_with_number);
+    let (actual_sym_with_number, symbols_sym_w_n) = lex_str!(":3");
+    let expected_sym_with_number = vec![Lexeme::Symbol(symbols_sym_w_n.get(":3").unwrap())];
+    assert_eq!(expected_sym_with_number, actual_sym_with_number);
 
     // should these produce an error?
-    let expected_fake_true = vec![Lexeme::Identifier("#tr".into())];
-    let actual_fake_true = lex_str!("#tr");
+    let (actual_fake_true, symbols_fake_true) = lex_str!("#tr");
+    let expected_fake_true = vec![Lexeme::Symbol(symbols_fake_true.get("#tr").unwrap())];
     assert_eq!(expected_fake_true, actual_fake_true);
   }
 
   #[test]
   fn lexeme_string() {
     let expected = vec![Lexeme::String("test".into())];
-    let actual = lex_str!("\"test\"");
+    let (actual, _) = lex_str!("\"test\"");
     assert_eq!(expected, actual);
 
     let expected_empty = vec![Lexeme::String("".into())];
-    let actual_empty = lex_str!("\"\"");
+    let (actual_empty, _) = lex_str!("\"\"");
     assert_eq!(expected_empty, actual_empty);
   }
 
   #[test]
   fn lexeme_boolean() {
     let expected_true = vec![Lexeme::Boolean(true)];
-    let actual_true = lex_str!("#t");
+    let (actual_true, _) = lex_str!("#t");
     assert_eq!(expected_true, actual_true);
 
-    let actual_long_true = lex_str!("#true");
+    let (actual_long_true, _) = lex_str!("#true");
     assert_eq!(expected_true, actual_long_true);
 
     let expected_false = vec![Lexeme::Boolean(false)];
-    let actual_false = lex_str!("#f");
+    let (actual_false, _) = lex_str!("#f");
     assert_eq!(expected_false, actual_false);
 
-    let actual_long_false = lex_str!("#false");
+    let (actual_long_false, _) = lex_str!("#false");
     assert_eq!(expected_false, actual_long_false);
   }
 
   #[test]
   fn lexeme_integer_from_decimal() {
     let expected_int = vec![Lexeme::Integer(420)];
-    let actual_int = lex_str!("420");
+    let (actual_int, _) = lex_str!("420");
     assert_eq!(expected_int, actual_int);
 
     let expected_negative_int = vec![Lexeme::Integer(-420)];
-    let actual_negative_int = lex_str!("-420");
+    let (actual_negative_int, _) = lex_str!("-420");
     assert_eq!(expected_negative_int, actual_negative_int);
 
     let expected_zero_prefix_int = vec![Lexeme::Integer(420)];
-    let actual_zero_prefix_int = lex_str!("0420");
+    let (actual_zero_prefix_int, _) = lex_str!("0420");
     assert_eq!(expected_zero_prefix_int, actual_zero_prefix_int);
 
     let expected_zero_prefix_negative_int = vec![Lexeme::Integer(-420)];
-    let actual_zero_prefix_negative_int = lex_str!("-0420");
+    let (actual_zero_prefix_negative_int , _)= lex_str!("-0420");
     assert_eq!(
       expected_zero_prefix_negative_int,
       actual_zero_prefix_negative_int,
     );
 
     let expected_underscored_int = vec![Lexeme::Integer(1_000_000)];
-    let actual_underscored_int = lex_str!("1_000_000");
+    let (actual_underscored_int, _) = lex_str!("1_000_000");
     assert_eq!(expected_underscored_int, actual_underscored_int);
 
     let illegal_decimal = lex_err!("35a7");
@@ -518,10 +521,10 @@ mod tests {
   #[test]
   fn lexeme_integer_from_hexadecimal() {
     let expected_hex = vec![Lexeme::Integer(255)];
-    let actual_hex = lex_str!("0xff");
+    let (actual_hex, _) = lex_str!("0xff");
     assert_eq!(expected_hex, actual_hex);
 
-    let actual_underscored_hex = lex_str!("0xf_f");
+    let (actual_underscored_hex, _) = lex_str!("0xf_f");
     assert_eq!(expected_hex, actual_underscored_hex);
 
     let not_hex = lex_err!("0x");
@@ -534,10 +537,10 @@ mod tests {
   #[test]
   fn lexeme_integer_from_binary() {
     let expected_bin = vec![Lexeme::Integer(6)];
-    let actual_bin = lex_str!("0b0110");
+    let (actual_bin, _) = lex_str!("0b0110");
     assert_eq!(expected_bin, actual_bin);
 
-    let actual_underscored_bin = lex_str!("0b0000_0110");
+    let (actual_underscored_bin, _) = lex_str!("0b0000_0110");
     assert_eq!(expected_bin, actual_underscored_bin);
 
     let not_bin = lex_err!("0b");
@@ -550,14 +553,14 @@ mod tests {
   #[test]
   fn lexeme_float() {
     let expected_float = vec![Lexeme::Float(0.5)];
-    let actual_float = lex_str!("0.5");
+    let (actual_float, _) = lex_str!("0.5");
     assert_eq!(expected_float, actual_float);
 
-    let actual_float_dot_prefix = lex_str!(".5");
+    let (actual_float_dot_prefix, _) = lex_str!(".5");
     assert_eq!(expected_float, actual_float_dot_prefix);
 
     let expected_float_dot_postfix = vec![Lexeme::Float(5.0)];
-    let actual_float_dot_postfix = lex_str!("5.");
+    let (actual_float_dot_postfix, _) = lex_str!("5.");
     assert_eq!(expected_float_dot_postfix, actual_float_dot_postfix);
 
     let not_float = lex_err!("0.3.4");
@@ -566,17 +569,17 @@ mod tests {
 
   #[test]
   fn list_of_everything() {
+    let (actual_list, symbols) = lex_str!("'(print #f \"hello!!\" 0xff 10.)");
     let expected_list = vec![
       Lexeme::Quote,
       Lexeme::LParen,
-      Lexeme::Identifier("print".into()),
+      Lexeme::Symbol(symbols.get("print").unwrap()),
       Lexeme::Boolean(false),
       Lexeme::String("hello!!".into()),
       Lexeme::Integer(255),
       Lexeme::Float(10.0),
       Lexeme::RParen,
     ];
-    let actual_list = lex_str!("'(print #f \"hello!!\" 0xff 10.)");
     assert_eq!(expected_list, actual_list);
   }
 
@@ -586,23 +589,23 @@ mod tests {
       Lexeme::LParen,
       Lexeme::RParen,
     ];
-    let actual_nil = lex_str!("()");
+    let (actual_nil, _) = lex_str!("()");
     assert_eq!(expected_nil, actual_nil);
 
-    let expected_ident = vec![
+    let (actual_sym, symbols_sym) = lex_str!("(uwu)");
+    let expected_sym = vec![
       Lexeme::LParen,
-      Lexeme::Identifier("uwu".into()),
+      Lexeme::Symbol(symbols_sym.get("uwu").unwrap()),
       Lexeme::RParen,
     ];
-    let actual_ident = lex_str!("(uwu)");
-    assert_eq!(expected_ident, actual_ident);
+    assert_eq!(expected_sym, actual_sym);
 
     let expected_bool = vec![
       Lexeme::LParen,
       Lexeme::Boolean(true),
       Lexeme::RParen,
     ];
-    let actual_bool = lex_str!("(#t)");
+    let (actual_bool, _) = lex_str!("(#t)");
     assert_eq!(expected_bool, actual_bool);
 
     let expected_str = vec![
@@ -610,7 +613,7 @@ mod tests {
       Lexeme::String("owo".into()),
       Lexeme::RParen,
     ];
-    let actual_str = lex_str!("(\"owo\")");
+    let (actual_str, _) = lex_str!("(\"owo\")");
     assert_eq!(expected_str, actual_str);
 
     let expected_int = vec![
@@ -618,7 +621,7 @@ mod tests {
       Lexeme::Integer(300),
       Lexeme::RParen,
     ];
-    let actual_int = lex_str!("(300)");
+    let (actual_int, _) = lex_str!("(300)");
     assert_eq!(expected_int, actual_int);
 
     let expected_float = vec![
@@ -626,7 +629,7 @@ mod tests {
       Lexeme::Float(0.15),
       Lexeme::RParen,
     ];
-    let actual_float = lex_str!("(.15)");
+    let (actual_float, _) = lex_str!("(.15)");
     assert_eq!(expected_float, actual_float);
   }
 }
