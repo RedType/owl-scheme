@@ -3,7 +3,7 @@ use std::{
   rc::Rc,
 };
 use crate::{
-  data::{Data, IdTable},
+  data::{Data, SymbolTable},
   parsing::{
     Info,
     Lexeme, LexItem,
@@ -13,7 +13,7 @@ use crate::{
 
 fn parse_list<I: Iterator<Item = LexItem>>(
   lexemes: &mut Peekable<I>,
-  identifiers: &mut IdTable,
+  symbols: &mut SymbolTable,
   head_info: Info,
 ) -> Result<Data, ParseError> {
   let mut list: Vec<Rc<Data>> = Vec::new();
@@ -27,7 +27,7 @@ fn parse_list<I: Iterator<Item = LexItem>>(
         return Ok(Data::List(list));
       },
       _ => {
-        let next_data = parse_rec(lexemes, identifiers)?;
+        let next_data = parse_rec(lexemes, symbols)?;
         list.push(Rc::new(next_data));
       },
     }
@@ -36,23 +36,23 @@ fn parse_list<I: Iterator<Item = LexItem>>(
 
 fn parse_rec<I: Iterator<Item = LexItem>>(
   lexemes: &mut Peekable<I>,
-  identifiers: &mut IdTable,
+  symbols: &mut SymbolTable,
 ) -> Result<Data, ParseError> {
   let data = match lexemes.next() {
-    Some(LexItem(Lexeme::Identifier(x), _)) => identifiers.add(&x),
+    Some(LexItem(Lexeme::Identifier(x), _)) => symbols.add(&x),
     Some(LexItem(Lexeme::Boolean(x), _)) => Data::Boolean(x),
     Some(LexItem(Lexeme::String(x), _)) => Data::String(x),
     Some(LexItem(Lexeme::Integer(x), _)) => Data::Integer(x),
     Some(LexItem(Lexeme::Float(x), _)) => Data::Float(x),
 
-    Some(LexItem(Lexeme::LParen, info)) => parse_list(lexemes, identifiers, info)?,
+    Some(LexItem(Lexeme::LParen, info)) => parse_list(lexemes, symbols, info)?,
     Some(LexItem(Lexeme::RParen, info)) => {
       return Err(ParseError(ParseErrorKind::MismatchedRParen, info));
     },
     Some(LexItem(Lexeme::Quote, _)) => {
       let list = vec![
-        Rc::new(identifiers.add("quote")),
-        Rc::new(parse_rec(lexemes, identifiers)?),
+        Rc::new(symbols.add("quote")),
+        Rc::new(parse_rec(lexemes, symbols)?),
       ];
       Data::List(list)
     },
@@ -63,19 +63,19 @@ fn parse_rec<I: Iterator<Item = LexItem>>(
   Ok(data)
 }
 
-pub fn parse<I>(sequence: I) -> Result<(Vec<Data>, IdTable), ParseError>
+pub fn parse<I>(sequence: I) -> Result<(Vec<Data>, SymbolTable), ParseError>
 where
   I: IntoIterator<Item = LexItem>,
 {
   let mut lexemes = sequence.into_iter().peekable();
-  let mut identifiers = IdTable::new();
+  let mut symbols = SymbolTable::new();
   let mut data = Vec::new();
 
   while let Some(_) = lexemes.peek() {
-    data.push(parse_rec(&mut lexemes, &mut identifiers)?);
+    data.push(parse_rec(&mut lexemes, &mut symbols)?);
   }
 
-  Ok((data, identifiers))
+  Ok((data, symbols))
 }
 
 #[cfg(test)]

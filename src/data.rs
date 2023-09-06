@@ -1,5 +1,5 @@
 use std::{
-  collections::HashMap,
+  collections::HashSet,
   fmt,
   rc::Rc,
 };
@@ -7,7 +7,7 @@ use std::{
 #[derive(Debug)]
 pub enum Data {
   List(Vec<Rc<Data>>),
-  Symbol(usize, Rc<str>),
+  Symbol(Rc<str>),
   String(String),
   Boolean(bool),
   Integer(i64),
@@ -20,7 +20,7 @@ impl PartialEq for Data {
 
     match (self, other) {
       (List(xs), List(ys)) => xs == ys,
-      (Symbol(x, _), Symbol(y, _)) => x == y,
+      (Symbol(x), Symbol(y)) => Rc::ptr_eq(x, y),
       (String(x), String(y)) => x == y,
       (Boolean(x), Boolean(y)) => x == y,
       (Integer(x), Integer(y)) => x == y,
@@ -44,7 +44,7 @@ impl fmt::Display for Data {
         }
         write!(f, ")")
       },
-      Symbol(_, name) => write!(f, "{}", name),
+      Symbol(name) => write!(f, "{}", name),
       String(x) => write!(f, "\"{}\"", x),
       Boolean(x) => write!(f, "{}", if *x { "#true" } else { "#false" }),
       Integer(x) => write!(f, "{}", x),
@@ -54,49 +54,25 @@ impl fmt::Display for Data {
 }
 
 #[derive(Debug, Default)]
-pub struct IdTable {
-  table: HashMap<Rc<str>, usize>,
-  lookup: Vec<Rc<str>>, 
-  next_id: usize,
-}
+pub struct SymbolTable(HashSet<Rc<str>>);
 
-impl IdTable {
+impl SymbolTable {
   pub fn new() -> Self {
-    Self {
-      table: HashMap::new(),
-      lookup: Vec::new(),
-      next_id: 0,
-    }
+    Self(HashSet::new())
   }
 
-  pub fn add(&mut self, name: &str) -> Data {
-    if let Some(&id) = self.table.get(name) {
-      Data::Symbol(id, Rc::clone(&self.lookup[id]))
+  pub fn add<S: AsRef<str>>(&mut self, name: S) -> Data {
+    if let Some(item) = self.0.get(name.as_ref()) {
+      Data::Symbol(Rc::clone(item))
     } else {
-      let id = self.next_id;
-      self.next_id += 1;
-      let own_name: Rc<str> = Rc::from(name);
-      self.table.insert(Rc::clone(&own_name), id);
-      self.lookup.push(Rc::clone(&own_name));
-
-      Data::Symbol(id, own_name)
+      let item = Rc::from(name.as_ref());
+      self.0.insert(Rc::clone(&item));
+      Data::Symbol(item)
     }
   }
 
-  pub fn get(&self, name: &str) -> Option<usize> {
-    self.table.get(name).copied()
-  }
-
-  pub fn get_sym(&self, name: &str) -> Option<Data> {
-    self.table.get(name).map(|&id| Data::Symbol(id, Rc::clone(&self.lookup[id])))
-  }
-
-  pub fn lookup(&self, id: usize) -> Option<Rc<str>> {
-    self.lookup.get(id).map(Rc::clone)
-  }
-
-  pub fn lookup_sym(&self, id: usize) -> Option<Data> {
-    self.lookup.get(id).map(|name| Data::Symbol(id, Rc::clone(name)))
+  pub fn get<S: AsRef<str>>(&self, name: S) -> Option<Data> {
+    self.0.get(name.as_ref()).map(|item| Data::Symbol(Rc::clone(item)))
   }
 }
 
@@ -109,7 +85,7 @@ mod tests {
   fn display() {
     use Data::*;
 
-    let mut table = IdTable::new();
+    let mut table = SymbolTable::new();
     let symbol = table.add("jeremy");
     assert_eq!(symbol.to_string(), "jeremy");
 
@@ -138,8 +114,8 @@ mod tests {
 
   macro_rules! unsym {
     ($sym:expr) => {
-      if let Data::Symbol(id, ref name) = $sym {
-        (id, name)
+      if let Data::Symbol(ref name) = $sym {
+        name
       } else {
         panic!("{:?} must be a Data::Symbol", $sym);
       }
@@ -148,85 +124,32 @@ mod tests {
 
   #[test]
   fn table_add() {
-    let mut table = IdTable::new();
+    let mut table = SymbolTable::new();
 
     let asdf_sym = table.add("asdf");
     let fdsa_sym = table.add("fdsa");
-    let asdf_sym_2 = table.add("asdf");
+    let asdf2_sym = table.add("asdf");
     let asdf = unsym!(asdf_sym);
     let fdsa = unsym!(fdsa_sym);
-    let asdf2 = unsym!(asdf_sym_2);
+    let asdf2 = unsym!(asdf2_sym);
 
-    assert_ne!(asdf, fdsa);
-    assert_eq!(asdf, asdf2);
+    assert_ne!(asdf_sym, fdsa_sym);
+    assert_eq!(asdf_sym, asdf2_sym);
 
-    assert_ne!(asdf.0, fdsa.0);
-    assert_eq!(asdf.0, asdf2.0);
-
-    assert_eq!(asdf.1, &Rc::from("asdf"));
-    assert_eq!(fdsa.1, &Rc::from("fdsa"));
-    assert_eq!(asdf2.1, &Rc::from("asdf"));
+    assert_eq!(asdf, &Rc::from("asdf"));
+    assert_eq!(fdsa, &Rc::from("fdsa"));
+    assert_eq!(asdf2, &Rc::from("asdf"));
   }
 
   #[test]
   fn table_get() {
-    let mut table = IdTable::new();
+    let mut table = SymbolTable::new();
 
     assert_eq!(table.get("asdf"), None);
-    assert_eq!(table.get("fdsa"), None);
-
-    let (asdf, _) = unsym!(table.add("asdf"));
-    let (fdsa, _) = unsym!(table.add("fdsa"));
-
-    assert_eq!(table.get("asdf"), Some(asdf));
-    assert_eq!(table.get("fdsa"), Some(fdsa));
-    assert_ne!(table.get("asdf"), table.get("fdsa"));
-  }
-
-  #[test]
-  fn table_get_sym() {
-    let mut table = IdTable::new();
-
-    assert_eq!(table.get_sym("asdf"), None);
 
     let asdf = table.add("asdf");
 
-    assert_eq!(table.get_sym("asdf").unwrap(), asdf);
-  }
-
-  #[test]
-  fn table_lookup() {
-    let mut table = IdTable::new();
-
-    assert_eq!(table.lookup(678), None);
-    assert_eq!(table.lookup(0), None);
-    assert_eq!(table.lookup(usize::MAX), None);
-
-    let asdf_sym = table.add("asdf");
-    let fdsa_sym = table.add("fdsa");
-    let asdf = unsym!(asdf_sym).0;
-    let fdsa = unsym!(fdsa_sym).0;
-
-    assert_eq!(table.lookup(asdf), Some(Rc::from("asdf")));
-    assert_eq!(table.lookup(fdsa), Some(Rc::from("fdsa")));
-
-    assert_eq!(table.lookup(asdf.saturating_add(fdsa).saturating_add(1)), None);
-  }
-
-  #[test]
-  fn table_lookup_sym() {
-    let mut table = IdTable::new();
-
-    assert_eq!(table.lookup_sym(1234), None);
-    assert_eq!(table.lookup_sym(0), None);
-    assert_eq!(table.lookup_sym(usize::MAX), None);
-
-    let asdf = table.add("asdf");
-    let (id, _) = unsym!(asdf);
-
-    assert_eq!(table.lookup_sym(id), Some(asdf));
-
-    assert_eq!(table.lookup_sym(id.saturating_add(1)), None);
+    assert_eq!(table.get("asdf").unwrap(), asdf);
   }
 }
 
