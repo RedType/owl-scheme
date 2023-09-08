@@ -10,6 +10,7 @@ pub enum Lexeme {
   LParen,
   RParen,
   Quote,
+  Dot,
   Symbol(Data),
   Boolean(bool),
   String(String),
@@ -25,6 +26,7 @@ impl PartialEq<Lexeme> for Lexeme {
       (LParen, LParen) => true,
       (RParen, RParen) => true,
       (Quote, Quote) => true,
+      (Dot, Dot) => true,
       (Symbol(a), Symbol(b)) => a == b, // fwd to the Data implementation
       (Boolean(a), Boolean(b)) => a == b,
       (String(a), String(b)) => a == b,
@@ -264,11 +266,20 @@ where
       },
 
       State::FloatOrDotIdent => {
-        scratch_pad.push(ch);
-        state = if ch.is_numeric() {
-          State::Decimal
-        } else {
-          State::BoolOrIdent
+        state = match ch {
+          ch@'(' | ch@')' | ch if ch.is_whitespace() => {
+            scratch_pad = String::new();
+            push_lex!(Lexeme::Dot);
+            State::Start
+          },
+          ch if ch.is_numeric() => {
+            scratch_pad.push(ch);
+            State::Decimal
+          },
+          ch => {
+            scratch_pad.push(ch);
+            State::BoolOrIdent
+          }
         };
 
         shift!();
@@ -431,6 +442,17 @@ mod tests {
   }
 
   #[test]
+  fn lexeme_dot() {
+    let expected = vec![Lexeme::Dot];
+    let (actual, _) = lex_str!(".");
+    assert_eq!(expected, actual);
+
+    let expected_double = vec![Lexeme::Dot, Lexeme::Dot];
+    let (actual_double, _) = lex_str!(". .");
+    assert_eq!(expected_double, actual_double);
+  }
+
+  #[test]
   fn lexeme_symbol() {
     let (actual, symbols) = lex_str!("test");
     let expected = vec![Lexeme::Symbol(symbols.get("test").unwrap())];
@@ -569,7 +591,7 @@ mod tests {
 
   #[test]
   fn list_of_everything() {
-    let (actual_list, symbols) = lex_str!("'(print #f \"hello!!\" 0xff 10.)");
+    let (actual_list, symbols) = lex_str!("'(print #f \"hello!!\" 0xff . 10.)");
     let expected_list = vec![
       Lexeme::Quote,
       Lexeme::LParen,
@@ -577,6 +599,7 @@ mod tests {
       Lexeme::Boolean(false),
       Lexeme::String("hello!!".into()),
       Lexeme::Integer(255),
+      Lexeme::Dot,
       Lexeme::Float(10.0),
       Lexeme::RParen,
     ];

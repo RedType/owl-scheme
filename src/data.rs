@@ -1,17 +1,32 @@
 use std::{
-  collections::HashSet,
+  collections::{HashSet, VecDeque},
   fmt,
   rc::Rc,
 };
+use gc::{Finalize, GcCell, Trace};
 
-#[derive(Debug)]
+#[derive(Debug, Finalize, Trace)]
 pub enum Data {
-  List(Vec<Rc<Data>>),
+  List(VecDeque<GcCell<Data>>),
   Symbol(Rc<str>),
   String(String),
   Boolean(bool),
   Integer(i64),
   Float(f64),
+}
+
+impl Data {
+  pub fn nil() -> Data {
+    Self::List(VecDeque::new())
+  }
+
+  pub fn is_nil(&self) -> bool {
+    if let Self::List(xs) = self {
+      xs.is_empty()
+    } else {
+      false
+    }
+  }
 }
 
 impl PartialEq for Data {
@@ -36,11 +51,23 @@ impl fmt::Display for Data {
 
     match self {
       List(xs) => {
+        let mut iter = xs.iter().peekable();
         let mut first = true;
+
         write!(f, "(")?;
-        for x in xs {
-          if first { first = false; } else { write!(f, " ")?; }
-          x.fmt(f)?;
+        while let Some(x) = iter.next() {
+          let last = iter.peek().is_none();
+          // write leading space
+          if first { first = false; } else if !last { write!(f, " ")?; }
+
+          // check to see if we're at the end
+          // if so, print a dot for non-nil and print nothing for nil
+          // otherwise just print the element
+          if !last {
+            write!(f, "{}", x.borrow())?;
+          } else if !x.borrow().is_nil() {
+            write!(f, " . {}", x.borrow())?;
+          }
         }
         write!(f, ")")
       },
@@ -103,13 +130,24 @@ mod tests {
     let float = Float(123.4);
     assert_eq!(float.to_string(), "123.4");
 
+    let nil = Data::nil();
+    assert_eq!(nil.to_string(), "()");
+
     let list = List(
-      [symbol, string, tru, fals, int, float]
+      [symbol, string, tru, fals, int, float, nil]
         .into_iter()
-        .map(Rc::new)
-        .collect::<Vec<_>>()
+        .map(GcCell::new)
+        .collect::<VecDeque<_>>()
     );
     assert_eq!(list.to_string(), "(jeremy \"upright bass\" #true #false 35 123.4)");
+
+    let dotted = List(
+      [Float(12.0), String("oy".into()), Data::nil(), Float(0.23456)]
+        .into_iter()
+        .map(GcCell::new)
+        .collect::<VecDeque<_>>()
+    );
+    assert_eq!(dotted.to_string(), "(12 \"oy\" () . 0.23456)")
   }
 
   macro_rules! unsym {

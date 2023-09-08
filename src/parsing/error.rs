@@ -13,6 +13,7 @@ pub enum ParseErrorKind {
   MismatchedLParen,
   MismatchedRParen,
   QuotedRParen,
+  WronglyDottedList,
 }
 
 #[derive(Debug)]
