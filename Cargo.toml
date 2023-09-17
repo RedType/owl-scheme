@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 authors = ["Will Young <wil.wyo@gmail.com>"]
 
+[build-dependencies]
+regex-automata = "^0.3"
+
 [dependencies]
 gc = { version = "^0.5", features = ["derive"] }
+regex-automata = "^0.3"
 
