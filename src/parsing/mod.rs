@@ -2,9 +2,9 @@ use crate::data::{Data, SymbolTable};
 
 mod error;
 mod lexer;
-mod parser;
+//mod parser;
 
-pub use self::error::{ParseError, ParseErrorKind};
+//pub use self::error::{ParseError, ParseErrorKind};
 
 #[derive(Clone, Copy, Debug)]
 pub struct Info {
@@ -13,6 +13,7 @@ pub struct Info {
   pub boundary_col: u64, // last non-value column
 }
 
+/*
 pub fn parse<I>(source: I) -> Result<(Vec<Data>, SymbolTable), ParseError>
 where
   I: IntoIterator<Item = char>,
@@ -21,4 +22,5 @@ where
   let data = parser::build_ast(lexemes, &mut symbols)?;
   Ok((data, symbols))
 }
+*/
 

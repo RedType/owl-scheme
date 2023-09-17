@@ -1,8 +1,15 @@
-use std::str::FromStr;
-
+use regex_automata::{
+  Anchored,
+  dfa::{Automaton, dense::DFA},
+  util::{
+    lazy::Lazy,
+    primitives::{PatternID, StateID},
+    wire::AlignAs,
+  },
+};
 use crate::{
   data::{Data, SymbolTable},
-  parsing::{Info, ParseError, ParseErrorKind},
+  parsing::{Info, /*ParseError, ParseErrorKind*/},
 };
 
 #[derive(Debug)]
@@ -11,372 +18,133 @@ pub enum Lexeme {
   RParen,
   Quote,
   Dot,
-  Symbol(Data),
-  Boolean(bool),
-  String(String),
-  Integer(i64),
-  Float(f64),
+  Data(Data),
 }
-
-impl PartialEq<Lexeme> for Lexeme {
-  fn eq(&self, other: &Lexeme) -> bool {
-    use Lexeme::*;
-
-    match (self, &other) {
-      (LParen, LParen) => true,
-      (RParen, RParen) => true,
-      (Quote, Quote) => true,
-      (Dot, Dot) => true,
-      (Symbol(a), Symbol(b)) => a == b, // fwd to the Data implementation
-      (Boolean(a), Boolean(b)) => a == b,
-      (String(a), String(b)) => a == b,
-      (Integer(a), Integer(b)) => a == b,
-      (Float(a), Float(b)) => a == b, // you should know better
-      _ => false,
-    }
-  }
-}
-impl Eq for Lexeme {}
 
 #[derive(Debug)]
 pub struct LexItem(pub Lexeme, pub Info);
 
-#[derive(Clone, Copy)]
-enum State {
-  Start,
-  Comment,
-  BoolOrIdent,
-  String,
-  NegativeOrIdent,
-  ZeroPrefixNumeric, // for non-decimal literals
-  FloatOrDotIdent,
-  Hexadecimal,
-  Decimal,
-  Binary,
+// precompiled regex
+static RE: Lazy<DFA<&'static [u32]>> = Lazy::new(|| {
+  static ALIGNED: &AlignAs<[u8], u32> = &AlignAs {
+    _align: [],
+    bytes: *include_bytes!(concat!(env!("OUT_DIR"), "/dfa.bin")),
+  };
+
+  DFA::from_bytes(&ALIGNED.bytes).unwrap().0
+});
+
+pub struct StreamLexer<'a> {
+  symbol_table: &'a mut SymbolTable,
+  start_state: StateID,
+  state: StateID,
+  scratch_pad: String,
+  strongest_match: Option<(PatternID, usize)>, // pattern and length of the match
+  consumed_chars: usize,
 }
 
-pub fn lex<I>(source: I) -> Result<(Vec<LexItem>, SymbolTable), ParseError>
-where
-  I: IntoIterator<Item = char>,
-{
-  let mut items = Vec::new();
-  let mut symbols = SymbolTable::new();
-  let mut state = State::Start;
-  // append a " " to end of input so that lexer can finish up
-  let mut chars = source.into_iter().chain(" ".chars()).peekable();
-  let mut line  = 0u64;
-  let mut col   = 0u64;
-  let mut boundary_col = 0u64;
-  let mut scratch_pad = String::new();
-  // for unshift
-  let mut prev_line: u64;
-  let mut prev_col: u64;
-  let mut prev_boundary_col = 0u64;
-  // for numerics
-  let mut negative = false;
-
-  // help us enforce that either shift or unshift are called
-  // every iteration
-  let mut shifted = true;
-
-  // iterate over all characters in input. only peek, because
-  // some state transitions may not want to consume the character
-  while let Some(&ch) = chars.peek() {
-    // check shifted
-    assert!(shifted);
-    #[allow(unused_assignments)]
-    { shifted = false; }
-
-    // update counters
-    prev_line = line;
-    prev_col = col;
-    match ch {
-      '\n' => {
-        line += 1;
-        col = 0;
-        boundary_col = 0;
-      },
-      c @ '(' | c @ ')' | c if c.is_whitespace() => {
-        col += 1;
-        prev_boundary_col = boundary_col;
-        boundary_col = col;
-      },
-      c if c.is_control() => {},
-      _ => col += 1,
-    }
-
-    // consume current char
-    macro_rules! shift {
-      () => {
-        shifted = true;
-        chars.next();
-      };
-    }
-
-    // reset line info when ch is not consumed
-    macro_rules! unshift {
-      () => {
-        shifted = true;
-        line = prev_line;
-        col = prev_col;
-        boundary_col = prev_boundary_col;
-      };
-    }
-
-    // pushes a lexeme into the result list, along with all the metadata
-    macro_rules! push_lex {
-      ($x:expr) => {
-        items.push(LexItem($x, Info {
-          line,
-          col,
-          boundary_col,
-        }))
-      };
-    }
-
-    // creates and wraps an error
-    macro_rules! err {
-      ($x:expr) => {
-        Err(ParseError($x, Info {
-          line,
-          col,
-          boundary_col,
-        }))
-      };
-    }
-
-    // execute state machine for this iteration
-    match state {
-      State::Start => {
-        match ch {
-          ';'  => state = State::Comment,
-          '('  => push_lex!(Lexeme::LParen),
-          ')'  => push_lex!(Lexeme::RParen),
-          '\'' => push_lex!(Lexeme::Quote),
-          '"'  => state = State::String,
-          '0'  => state = State::ZeroPrefixNumeric,
-          '-'  => state = State::NegativeOrIdent,
-          '.'  => {
-            scratch_pad.push('.');
-            state = State::FloatOrDotIdent;
-          }
-          c if c.is_whitespace() => {},
-          c if c.is_digit(10) => {
-            state = State::Decimal;
-            scratch_pad.push(c);
-          },
-          c if c.is_control() =>
-            return err!(ParseErrorKind::IllegalCharacter(c)),
-          c => {
-            state = State::BoolOrIdent;
-            scratch_pad.push(c);
-          }
-        }
-
-        // everything in this state consumes ch
-        shift!();
-      },
-
-      State::Comment => {
-        if ch == '\n' {
-          state = State::Start;
-        }
-
-        shift!();
-      },
-
-      State::BoolOrIdent => {
-        if ch.is_alphanumeric() {
-          scratch_pad.push(ch);
-          shift!();
-        } else {
-          match scratch_pad.as_str() {
-            "#t" | "#true"  => push_lex!(Lexeme::Boolean(true)),
-            "#f" | "#false" => push_lex!(Lexeme::Boolean(false)),
-            _ => push_lex!(Lexeme::Symbol(symbols.add(&scratch_pad))),
-          }
-          scratch_pad = String::new();
-          state = State::Start;
-          unshift!();
-        }
-      },
-
-      State::String => {
-        match ch {
-          '\\' => {
-            //TODO do escapes
-            todo!();
-          },
-          '"' => {
-            push_lex!(Lexeme::String(scratch_pad));
-            scratch_pad = String::new();
-            state = State::Start;
-          },
-          c => scratch_pad.push(c),
-        }
-
-        shift!();
-      },
-
-      State::NegativeOrIdent => {
-        match ch {
-          '0' => {
-            negative = true;
-            state = State::ZeroPrefixNumeric;
-          },
-          c if c.is_numeric() => {
-            negative = true;
-            scratch_pad.push(c);
-            state = State::Decimal;
-          },
-          _ => {
-            negative = false;
-            scratch_pad.push('-');
-            state = State::BoolOrIdent;
-          },
-        }
-
-        shift!();
-      },
-
-      State::ZeroPrefixNumeric => {
-        match ch {
-          'x' => state = State::Hexadecimal,
-          'b' => state = State::Binary,
-          '.' => {
-            scratch_pad.push_str("0.");
-            state = State::Decimal;
-          },
-          c if c.is_numeric() => {
-            scratch_pad.push(c);
-            state = State::Decimal;
-          },
-          c if c.is_alphabetic() =>
-            return err!(ParseErrorKind::InvalidNumber),
-          _ => {
-            negative = false;
-            push_lex!(Lexeme::Integer(0));
-            state = State::Start;
-            unshift!();
-            continue; // so we don't shift later
-          },
-        }
-
-        shift!();
-      },
-
-      State::FloatOrDotIdent => {
-        state = match ch {
-          ch@'(' | ch@')' | ch if ch.is_whitespace() => {
-            scratch_pad = String::new();
-            push_lex!(Lexeme::Dot);
-            State::Start
-          },
-          ch if ch.is_numeric() => {
-            scratch_pad.push(ch);
-            State::Decimal
-          },
-          ch => {
-            scratch_pad.push(ch);
-            State::BoolOrIdent
-          }
-        };
-
-        shift!();
-      },
-
-      State::Hexadecimal => {
-        match ch {
-          '.' => return err!(ParseErrorKind::DotInNonDecimalNumeric),
-          '_' => (),
-          c @ '(' | c @ ')' | c if c.is_whitespace() => {
-            if let Ok(n) = i64::from_str_radix(&scratch_pad, 16) {
-              let final_n = if negative { -1 } else { 1 } * n;
-              push_lex!(Lexeme::Integer(final_n));
-            } else {
-              return err!(ParseErrorKind::InvalidNumber);
-            }
-
-            negative = false;
-            scratch_pad = String::new();
-            state = State::Start;
-            unshift!();
-            continue;
-          },
-          c if c.is_digit(16) => scratch_pad.push(ch),
-          _ => return err!(ParseErrorKind::NonHexCharInHex),
-        }
-
-        shift!();
-      },
-
-      State::Binary => {
-        match ch {
-          '.' => return err!(ParseErrorKind::DotInNonDecimalNumeric),
-          '_' => (),
-          c @ '(' | c @ ')' | c if c.is_whitespace() => {
-            if let Ok(n) = i64::from_str_radix(&scratch_pad, 2) {
-              let final_n = if negative { -1 } else { 1 } * n;
-              push_lex!(Lexeme::Integer(final_n));
-            } else {
-              return err!(ParseErrorKind::InvalidNumber);
-            }
-
-            negative = false;
-            scratch_pad = String::new();
-            state = State::Start;
-            unshift!();
-            continue;
-          },
-          c if c.is_digit(2) => scratch_pad.push(ch),
-          _ => return err!(ParseErrorKind::NonBinCharInBin),
-        }
-
-        shift!();
-      },
-
-      State::Decimal => {
-        let mut do_conversion = false;
-        match ch {
-          '_' => (),
-          '.' => scratch_pad.push('.'),
-          '(' | ')' => do_conversion = true,
-          c if c.is_whitespace() => do_conversion = true,
-          c if c.is_digit(10) => scratch_pad.push(c),
-          _ => return err!(ParseErrorKind::NonDecCharInDec),
-        }
-
-        if do_conversion {
-          if scratch_pad.contains('.') {
-            // if there's a . then it's a float
-            if let Ok(n) = f64::from_str(&scratch_pad) {
-              let final_n = if negative { -1.0 } else { 1.0 } * n;
-              push_lex!(Lexeme::Float(final_n));
-            } else {
-              return err!(ParseErrorKind::InvalidNumber);
-            }
-          } else {
-            // if there's no . then it's an integer
-            if let Ok(n) = i64::from_str_radix(&scratch_pad, 10) {
-              let final_n = if negative { -1 } else { 1 } * n;
-              push_lex!(Lexeme::Integer(final_n));
-            } else {
-              return err!(ParseErrorKind::InvalidNumber);
-            }
-          }
-
-          negative = false;
-          scratch_pad = String::new();
-          state = State::Start;
-          unshift!();
-        } else {
-          shift!();
-        }
-      },
+impl<'a> StreamLexer<'a> {
+  pub fn new(symbol_table: &'a mut SymbolTable) -> Self {
+    let start_state = RE.universal_start_state(Anchored::Yes)
+      .expect("DFA patterns must not start with look-around");
+    Self {
+      symbol_table,
+      start_state,
+      state: start_state,
+      scratch_pad: String::new(),
+      strongest_match: None,
+      consumed_chars: 0,
     }
   }
 
-  Ok((items, symbols))
+  pub fn reset(&mut self) {
+    self.state = self.start_state;
+    self.scratch_pad.clear();
+    self.strongest_match = None;
+    self.consumed_chars = 0;
+  }
+
+  pub fn push<T: AsRef<str>>(
+    &mut self,
+    lexeme_store: &mut Vec<LexItem>,
+    tokens: T,
+  ) -> Result<(), ()> {
+    //self.scratch_pad.push(token);
+    //self.state = RE.next_state(self.state, )
+    //self.lex()
+    todo!()
+  }
+
+  pub fn end(
+    &mut self,
+    lexeme_store: &mut Vec<LexItem>,
+  ) -> Result<(), ()> {
+    self.state = RE.next_eoi_state(self.state);
+    let res = self.lex(lexeme_store);
+    self.reset();
+    res
+  }
+
+  fn lex(&mut self, target: &mut Vec<LexItem>) -> Result<(), ()> {
+    if !RE.is_special_state(self.state) {
+      return Ok(());
+    } else if RE.is_quit_state(self.state) {
+      unreachable!();
+    } else if RE.is_match_state(self.state) {
+      // one or more matches have been found (but not necessarily the best one)
+      for i in 0..RE.match_len(self.state) {
+        let pattern = (RE.match_pattern(self.state, i), self.consumed_chars);
+        self.strongest_match = Some(self.strongest_match
+          .map_or(pattern, |old| if pattern.0 < old.0 { pattern } else { old }));
+      }
+    } else if RE.is_dead_state(self.state) {
+      // no more matches can be made, so lex the best one
+      if self.strongest_match.is_none() {
+        return Err(());
+      }
+      let (matched_pattern, matched_chars) = self.strongest_match.unwrap();
+
+      macro_rules! push_lex {
+        ($lex:expr) => {
+          target.push(LexItem($lex, Info {
+            line: 0, //NYI
+            col: 0, //NYI
+            boundary_col: 0, //NYI
+          }))
+        };
+      }
+
+      match matched_pattern.as_usize() {
+      /*        Comment */  0 => (),
+      /*     Whitespace */  1 => (),
+      /*         LParen */  2 => { push_lex!(Lexeme::LParen); }
+      /*         RParen */  3 => { push_lex!(Lexeme::RParen); }
+      /*          Quote */  4 => { push_lex!(Lexeme::Quote); }
+      /*  Boolean(true) */  5 => { push_lex!(Lexeme::Data(Data::Boolean(true))); }
+      /* Boolean(false) */  6 => { push_lex!(Lexeme::Data(Data::Boolean(false))); }
+      /*            Dot */  7 => { push_lex!(Lexeme::Dot); },
+      /*     Identifier */  8 => todo!(),
+      /* Extended Ident */  9 => todo!(),
+      /*         String */ 10 => todo!(),
+      /*          Float */ 11 => todo!(),
+      /*    Hexadecimal */ 12 => todo!(),
+      /*         Binary */ 13 => todo!(),
+      /*        Decimal */ 14 => todo!(),
+                            _ => unreachable!(),
+      }
+
+      // check if we need to re-consume any bytes
+      if self.scratch_pad.len() > matched_chars {
+        let reuse_pad = Box::from(&self.scratch_pad[matched_chars..]);
+        self.reset();
+        self.push(target, &reuse_pad)?;
+      }
+
+      self.reset();
+    }
+
+    Ok(())
+  }
 }
 
 #[cfg(test)]
