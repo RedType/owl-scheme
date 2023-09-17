@@ -13,7 +13,7 @@ pub enum Data {
   Boolean(bool),
   Integer(i64),
   Float(f64),
-  Builtin(Rc<dyn FnMut(&mut Data) -> Data>),
+  //Builtin(Rc<dyn FnMut(&mut Data) -> Data>),
 }
 
 impl Data {
@@ -41,7 +41,7 @@ impl PartialEq for Data {
       (Boolean(x), Boolean(y)) => x == y,
       (Integer(x), Integer(y)) => x == y,
       (Float(x), Float(y)) => x == y, // you should know better
-      (Builtin(x), Builtin(y)) => x == y,
+      //(Builtin(x), Builtin(y)) => x == y,
       _ => false,
     }
   }
