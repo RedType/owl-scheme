@@ -1,9 +1,11 @@
 use std::{
-  collections::{HashSet, VecDeque},
+  collections::{HashMap, HashSet, VecDeque},
   fmt,
   rc::Rc,
 };
 use gc::{Finalize, GcCell, Trace};
+
+pub type BuiltinFn = FnMut(&mut Data) -> Result<Data, ()>;
 
 #[derive(Debug, Finalize, Trace)]
 pub enum Data {
@@ -11,9 +13,13 @@ pub enum Data {
   Symbol(Rc<str>),
   String(String),
   Boolean(bool),
+  // first element is the fn name
+  Builtin(Rc<str>, Rc<dyn BuiltinFn>),
+  // numbers
+  Complex(f64, f64),
+  Real(f64),
+  Rational(i64, u64),
   Integer(i64),
-  Float(f64),
-  Builtin(Rc<dyn FnMut(&mut Data) -> Data>),
 }
 
 impl Data {
@@ -22,27 +28,10 @@ impl Data {
   }
 
   pub fn is_nil(&self) -> bool {
-    if let Self::List(xs) = self {
+    if let Self::List(xs) {
       xs.is_empty()
     } else {
       false
-    }
-  }
-}
-
-impl PartialEq for Data {
-  fn eq(&self, other: &Data) -> bool {
-    use Data::*;
-
-    match (self, other) {
-      (List(xs), List(ys)) => xs == ys,
-      (Symbol(x), Symbol(y)) => Rc::ptr_eq(x, y),
-      (String(x), String(y)) => x == y,
-      (Boolean(x), Boolean(y)) => x == y,
-      (Integer(x), Integer(y)) => x == y,
-      (Float(x), Float(y)) => x == y, // you should know better
-      (Builtin(x), Builtin(y)) => x == y,
-      _ => false,
     }
   }
 }
@@ -76,8 +65,28 @@ impl fmt::Display for Data {
       Symbol(name) => write!(f, "{}", name),
       String(x) => write!(f, "\"{}\"", x),
       Boolean(x) => write!(f, "{}", if *x { "#true" } else { "#false" }),
+      Complex(r, i) => {
+        if i == 0.0 {
+          write!(f, "{}", r)
+        } else if r == 0.0 {
+          write!(f, "{}i", i)
+        } else {
+          let sign = if i < 0 { "-" } else { "+" };
+          write!(f, "{}{}{}i", r, sign, i)
+        }
+      },
+      Real(x) => write!(f, "{}", x),
+      Rational(n, d) => {
+        if d == 1 {
+          write!(f, "{}", n)
+        } else if n == 0 {
+          write!(f, "0")
+        } else {
+          write!(f, "{}/{}", n, d)
+        }
+      },
       Integer(x) => write!(f, "{}", x),
-      Float(x) => write!(f, "{}", x),
+      Builtin(name, _) => write!(f, "<builtin fn {}>", name),
     }
   }
 }
@@ -129,7 +138,7 @@ mod tests {
     let int = Integer(35);
     assert_eq!(int.to_string(), "35");
 
-    let float = Float(123.4);
+    let float = Real(123.4);
     assert_eq!(float.to_string(), "123.4");
 
     let nil = Data::nil();
@@ -144,7 +153,7 @@ mod tests {
     assert_eq!(list.to_string(), "(jeremy \"upright bass\" #true #false 35 123.4)");
 
     let dotted = List(
-      [Float(12.0), String("oy".into()), Data::nil(), Float(0.23456)]
+      [Real(12.0), String("oy".into()), Data::nil(), Real(0.23456)]
         .into_iter()
         .map(GcCell::new)
         .collect::<VecDeque<_>>()
@@ -160,6 +169,30 @@ mod tests {
         panic!("{:?} must be a Data::Symbol", $sym);
       }
     }
+  }
+
+  #[test]
+  fn display_numbers() {
+    let complex = Complex(123.4, 5.0);
+    assert_eq!(complex.to_string(), "123.4+5.0i");
+
+    let complex2 = Complex(123.4, -5.0);
+    assert_eq!(complex2.to_string(), "123.4-5.0i");
+
+    let complex3 = Complex(0.0, -5.0);
+    assert_eq!(complex3.to_string(), "-5.0i");
+
+    let complex4 = Complex(1.1, 0.0);
+    assert_eq!(complex4.to_string(), "1.1");
+
+    let rational = Data::rat(3, -4);
+    assert_eq!(rational.to_string(), "-3/4");
+
+    let rational2 = Rational(0, 4);
+    assert_eq!(rational2.to_string(), "0");
+
+    let rational3 = Rational(4, 1);
+    assert_eq!(rational3.to_string(), "4");
   }
 
   #[test]
