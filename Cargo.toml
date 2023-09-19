@@ -6,4 +6,5 @@ authors = ["Will Young <wil.wyo@gmail.com>"]
 
 [dependencies]
 gc = { version = "^0.5", features = ["derive"] }
+log = "0.4.20"
 
