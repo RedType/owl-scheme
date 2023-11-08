@@ -8,13 +8,13 @@ macro_rules! builtin {
   ($vm:ident, $name:expr, $f:expr) => {
     $vm.def_builtin($name, |data| if let List(xs) = data {
       // fetch iterator and effective length of argument list (without trailing nil)
-      let (mut iter, len) = if xs.back().borrow().is_nil() {
+      let (mut iter, len) = if xs.back().unwrap().borrow().is_nil() {
         (xs.iter().take(xs.len() - 1), xs.len() - 1)
       } else {
-        (xs.iter(), xs.len())
+        (xs.iter().take(xs.len()), xs.len())
       };
       $f($vm, iter, len)
-    } else if let Nil = data {
+    } else if data.is_nil() {
       $f($vm, iter::empty(), 0)
     } else {
       panic!("Failed precondition: builtins must be passed an argument list")
@@ -22,7 +22,7 @@ macro_rules! builtin {
   };
 }
 
-fn import_std(vm: &mut VM) {
+pub fn import_std(vm: &mut VM) {
   use Data::*;
 
   builtin!(vm, "number?", |_, args, _| {
@@ -131,9 +131,9 @@ fn import_std(vm: &mut VM) {
       (Complex(lr, li), Complex(rr, ri)) =>
         Complex(lr + rr, li + ri),
         
-      _ => Nil,
+      _ => Data::nil(),
     });
-    if let Nil = res { Err(()) } else { Ok(res) }
+    if res.is_nil() { Err(()) } else { Ok(res) }
   });
 
   builtin!(vm, "*", |xs, _| {
@@ -161,9 +161,9 @@ fn import_std(vm: &mut VM) {
       (Complex(lr, li), Complex(rr, ri)) =>
         Complex(lr * rr - li * ri, lr * ri + li * rr),
         
-      _ => Nil,
+      _ => Data::nil(),
     });
-    if let Nil = res { Err(()) } else { Ok(res) }
+    if res.is_nil() { Err(()) } else { Ok(res) }
   });
 
   builtin!(vm, "-", |xs, len| {
@@ -172,19 +172,19 @@ fn import_std(vm: &mut VM) {
     } else if len == 1 {
       return match xs.next() {
         Integer(x) => Ok(Integer(-x)),
-        Float(x) => Ok(Float(-x)),
+        Real(x) => Ok(Real(-x)),
         _ => Err(()),
       };
     } else {
       let minuend = xs.next();
       let res = xs.fold(minuend.borrow(), |a, x| match (a, x.borrow()) {
         (Integer(l), Integer(r)) => Integer(l - r),
-        (Float(l), Integer(r)) => Float(l - r as f64),
-        (Integer(l), Float(r)) => Float(l as f64 - r),
-        (Float(l), Float(r)) => Float(l - r),
-        _ => Nil,
+        (Real(l), Integer(r)) => Real(l - r as f64),
+        (Integer(l), Real(r)) => Real(l as f64 - r),
+        (Real(l), Real(r)) => Real(l - r),
+        _ => Data::nil(),
       });
-      if let Nil = res { Err(()) } else { Ok(res) }
+      if res.is_nil() { Err(()) } else { Ok(res) }
     }
   });
 
@@ -193,20 +193,20 @@ fn import_std(vm: &mut VM) {
       Err(())
     } else if len == 1 {
       return match xs.next() {
-        Integer(x) => Ok(Float(1 / x as f64)),
-        Float(x) => Ok(Float(1 / x)),
+        Integer(x) => Ok(Real(1 / x as f64)),
+        Real(x) => Ok(Real(1 / x)),
         _ => Err(()),
       };
     } else {
       let dividend = xs.next();
       let res = xs.fold(dividend.borrow(), |a, x| match (a, x.borrow()) {
-        (Integer(l), Integer(r)) => Float(l as f64 / r as f64),
-        (Float(l), Integer(r)) => Float(l / r as f64),
-        (Integer(l), Float(r)) => Float(l as f64 / r),
-        (Float(l), Float(r)) => Float(l / r),
-        _ => Nil,
+        (Integer(l), Integer(r)) => Real(l as f64 / r as f64),
+        (Real(l), Integer(r)) => Real(l / r as f64),
+        (Integer(l), Real(r)) => Real(l as f64 / r),
+        (Real(l), Real(r)) => Real(l / r),
+        _ => Data::nil(),
       });
-      if let Nil = res { Err(()) } else { Ok(res) }
+      if res.is_nil() { Err(()) } else { Ok(res) }
     }
   });
 }

@@ -1,6 +1,6 @@
 pub mod parsing;
 pub mod data;
-pub mod std;
+pub mod stdlib;
 pub mod vm;
 
 mod util;
