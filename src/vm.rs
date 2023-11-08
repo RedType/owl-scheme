@@ -1,66 +1,84 @@
+use log::*;
 use std::{
-  collections::{HashMap, HashSet, VecDeque},
-  fmt,
+  collections::HashMap,
+  fmt::Write,
   rc::Rc,
 };
-use gc::{Finalize, GcCell, Trace};
-use log::*;
 use crate::{
   data::{BuiltinFn, Data, SymbolTable},
-  std,
-  util::Sieve,
-}
+  stdlib,
+  util::{LRU, Sieve},
+};
 
 #[derive(Debug)]
 pub struct VM {
-  builtins: HashMap<Rc<str>, Rc<BuiltinFn>>,
-  symbols: SymbolTable,
+  builtins: HashMap<Rc<str>, Rc<dyn BuiltinFn>>,
+  pub symbols: SymbolTable,
   prime_sieve: Sieve,
-  factors_memo: HashMap<u64, Vec<u64>>,
+  factors_memo: HashMap<usize, Vec<usize>>,
+  factors_eviction_queue: LRU,
 }
 
 impl VM {
+  const MEMO_SZ: usize = 1000;
+
   pub fn new() -> Self {
     Self {
       builtins: HashMap::new(),
       symbols: SymbolTable::new(),
       prime_sieve: Sieve::new(),
-      factors_memo: HashMap::new(),
+      factors_memo: HashMap::with_capacity(Self::MEMO_SZ),
+      factors_eviction_queue: LRU::with_capacity(Self::MEMO_SZ),
     }
   }
 
   pub fn def_builtin<F: BuiltinFn, S: AsRef<str>>(&mut self, name: S, code: F) {
     let sym = self.symbols.add(name);
-    let replaced = self.builtins.insert(Rc::clone(sym.0), Rc::new(code));
-    if replaced.is_some() {
-      warn!("Redefined a builtin function. You probably don't want to do this.");
+    if let Data::Symbol(name) = sym {
+      let replaced = self.builtins.insert(Rc::clone(&name), Rc::new(code));
+      if replaced.is_some() {
+        warn!("Redefined {}, a builtin function. You probably don't want to do this.", name);
+      }
+    } else {
+      unreachable!();
     }
   }
 
   pub fn fetch_builtin<S: AsRef<str>>(&self, name: S) -> Option<Data> {
-    let named_code = self.builtins.get_key_value(name);
+    let named_code = self.builtins.get_key_value(name.as_ref());
     named_code.map(|(name, code)| Data::Builtin(Rc::clone(name), Rc::clone(code)))
   }
 
   pub fn factorize(&mut self, n: u64) -> &[u64] {
-    if let Some(factors) = self.factors_memo.get(n) {
+    if let Some(factors) = self.factors_memo.get(&n) {
+      // update LRU
+      self.factors_eviction_queue.touch(n);
       return factors;
+    }
+
+    // check for eviction
+    debug_assert!(self.factors_memo.len() <= Self::MEMO_SZ);
+    debug_assert!(self.factors_memo.len() == self.factors_eviction_queue.len());
+    if self.factors_memo.len() >= Self::MEMO_SZ {
+      let evict = self.factors_eviction_queue.dequeue().unwrap();
+      self.factors_memo.remove(&evict);
     }
 
     let mut a = n;
     let mut factors = Vec::new();
 
-    for p in self.prime_sieve.sieve(n) {
+    for &p in self.prime_sieve.sieve(n as usize) {
       if a == 0 || a == 1 { break; }
 
       while a % p == 0 {
         a /= p;
-        factors += p;
+        factors.push(p);
       }
     }
 
     self.factors_memo.insert(n, factors);
-    self.factors_memo.get(n).unwrap()
+    self.factors_eviction_queue.enqueue(n);
+    &self.factors_memo.get(&n).unwrap()[..]
   }
 
   pub fn gcf(&mut self, m: u64, n: u64) -> u64 {
@@ -86,18 +104,157 @@ impl VM {
     common_factors.iter().fold(1, |a, f| a * f)
   }
 
-  pub fn rat(&mut self, numerator: i64, denominator: i64) -> Data {
-    let sign_correction = if denominator < 0 { -1 } else { 1 };
-    let gcf = self.gcf(numerator.abs() as u64, denominator.abs() as u64);
-    Data::Rational(sign_correction * numerator / gcf, denominator / gcf)
+  pub fn display_data(&mut self, d: &Data) -> String {
+    let mut output = String::new();
+    self.display_data_rec(&mut output, d);
+    output
+  }
+
+  fn display_data_rec(&mut self, f: &mut String, d: &Data) {
+    use Data::*;
+
+    match d {
+      List(xs) => {
+        let mut iter = xs.iter().peekable();
+        let mut first = true;
+
+        write!(f, "(").unwrap();
+        while let Some(x) = iter.next() {
+          let last = iter.peek().is_none();
+          // write leading space
+          if first { first = false; } else if !last { write!(f, " ").unwrap(); }
+
+          // check to see if we're at the end
+          // if so, print a dot for non-nil and print nothing for nil
+          // otherwise just print the element
+          if !last {
+            self.display_data_rec(f, &x.borrow());
+          } else if !x.borrow().is_nil() {
+            write!(f, " . ").unwrap();
+            self.display_data_rec(f, &x.borrow());
+          }
+        }
+        write!(f, ")")
+      },
+      Symbol(name) => write!(f, "{}", name),
+      String(x) => write!(f, "\"{}\"", x),
+      Boolean(x) => write!(f, "{}", if *x { "#true" } else { "#false" }),
+      Complex(r, i) => {
+        if *i == 0.0 {
+          write!(f, "{}", *r)
+        } else if *r == 0.0 {
+          write!(f, "{}i", *i)
+        } else {
+          let sign = if *i < 0.0 { "-" } else { "+" };
+          write!(f, "{}{}{}i", *r, sign, *i)
+        }
+      },
+      Real(x) => write!(f, "{}", x),
+      Rational(n, d) => {
+        // reduce
+        let gcf = self.gcf(n.abs() as u64, *d);
+        let (rn, rd) = (*n / gcf as i64, *d / gcf);
+
+        if rd == 1 {
+          write!(f, "{}", rn)
+        } else if rn == 0 {
+          write!(f, "0")
+        } else {
+          write!(f, "{}/{}", rn, rd)
+        }
+      },
+      Integer(x) => write!(f, "{}", x),
+      Builtin(name, _) => write!(f, "<builtin fn {}>", name),
+    }.unwrap();
   }
 }
 
 impl Default for VM {
   fn default() -> Self {
     let mut me = VM::new();
-    std::import_std(&mut me);
+    stdlib::import_std(&mut me);
     me
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use gc::GcCell;
+  use std::collections::VecDeque;
+  use crate::{
+    data::{Data, SymbolTable},
+    vm::VM,
+  };
+
+  #[test]
+  fn display_data() {
+    use Data::*;
+
+    let mut vm = VM::new();
+
+    let symbol = vm.symbols.add("jeremy");
+    assert_eq!(vm.display_data(symbol), "jeremy".to_owned());
+
+    let string = String("upright bass".to_owned());
+    assert_eq!(vm.display_data(string), "\"upright bass\"");
+
+    let tru = Boolean(true);
+    let fals = Boolean(false);
+    assert_eq!(vm.display_data(tru), "#true");
+    assert_eq!(vm.display_data(fals), "#false");
+
+    let int = Integer(35);
+    assert_eq!(vm.display_data(int), "35");
+
+    let float = Real(123.4);
+    assert_eq!(vm.display_data(float), "123.4");
+
+    let nil = Data::nil();
+    assert_eq!(vm.display_data(nil), "()");
+
+    let list = List(
+      [symbol, string, tru, fals, int, float, nil]
+        .into_iter()
+        .map(GcCell::new)
+        .collect::<VecDeque<_>>()
+    );
+    assert_eq!(vm.display_data(list), "(jeremy \"upright bass\" #true #false 35 123.4)");
+
+    let dotted = List(
+      [Real(12.0), String("oy".into()), Data::nil(), Real(0.23456)]
+        .into_iter()
+        .map(GcCell::new)
+        .collect::<VecDeque<_>>()
+    );
+    assert_eq!(vm.display_data(dotted), "(12 \"oy\" () . 0.23456)");
+  }
+
+  #[test]
+  fn display_numbers() {
+    use Data::*;
+
+    let mut vm = VM::new();
+
+    let complex = Complex(123.4, 5.0);
+    assert_eq!(vm.display_data(complex), "123.4+5.0i");
+
+    let complex2 = Complex(123.4, -5.0);
+    assert_eq!(vm.display_data(complex2), "123.4-5.0i");
+
+    let complex3 = Complex(0.0, -5.0);
+    assert_eq!(vm.display_data(complex3), "-5.0i");
+
+    let complex4 = Complex(1.1, 0.0);
+    assert_eq!(vm.display_data(complex4), "1.1");
+
+    let rational = Rational(3, -4);
+    assert_eq!(vm.display_data(rational), "-3/4");
+
+    let rational2 = Rational(0, 4);
+    assert_eq!(vm.display_data(rational2), "0");
+
+    let rational3 = Rational(4, 1);
+    assert_eq!(vm.display_data(rational3), "4");
   }
 }
 
