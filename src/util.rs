@@ -1,55 +1,27 @@
 use std::{
   cell::RefCell,
   collections::HashMap,
+  fmt::Debug,
+  hash::Hash,
   rc::{Rc, Weak},
 };
 use log::*;
 
 #[derive(Debug)]
-pub struct Sieve(Vec<usize>);
-
-impl Sieve {
-  pub fn new() -> Self {
-    Self(vec![2])
-  }
-
-  pub fn sieve(&mut self, limit: usize) -> &[usize] {
-    let top = self.0[self.0.len() - 1];
-
-    if limit > top {
-      let sieve = vec![true; limit - top];
-
-      for n in (top + 1)..=limit {
-        for m in 1..(limit / n) {
-          sieve[(n * m - top - 1)] = false;
-        }
-      }
-
-      for prime in sieve.iter().enumerate().filter(|(_, p)| **p).map(|(i, _)| i + top + 1) {
-        self.0.push(prime);
-      }
-    }
-
-    let primes = self.0.iter().take_while(|p| **p <= limit).count();
-    &self.0[..primes]
-  }
+pub struct LRU<T: Debug + Eq + Hash> {
+  index: HashMap<T, Rc<RefCell<LRUNode<T>>>>,
+  head: Option<Rc<RefCell<LRUNode<T>>>>,
+  tail: Option<Rc<RefCell<LRUNode<T>>>>,
 }
 
 #[derive(Debug)]
-struct LRUNode {
-  n: usize,
-  prev: Option<Weak<RefCell<LRUNode>>>,
-  next: Option<Rc<RefCell<LRUNode>>>,
+struct LRUNode<T: Debug + Eq + Hash> {
+  elem: T,
+  prev: Option<Weak<RefCell<LRUNode<T>>>>,
+  next: Option<Rc<RefCell<LRUNode<T>>>>,
 }
 
-#[derive(Debug)]
-pub struct LRU {
-  index: HashMap<usize, Rc<RefCell<LRUNode>>>,
-  head: Option<Rc<RefCell<LRUNode>>>,
-  tail: Option<Rc<RefCell<LRUNode>>>,
-}
-
-impl LRU {
+impl<T: Debug + Eq + Hash> LRU<T> {
   pub fn with_capacity(n: usize) -> Self {
     Self {
       index: HashMap::with_capacity(n),
@@ -62,15 +34,15 @@ impl LRU {
     self.index.len()
   }
 
-  pub fn enqueue(&mut self, n: usize) {
-    if self.index.contains_key(&n) {
-      warn!("Attempted to enqueue already-existing cache element {}", n);
-      self.touch(n);
+  pub fn enqueue(&mut self, elem: T) {
+    if self.index.contains_key(&elem) {
+      warn!("Attempted to enqueue already-existing cache element {:?}", elem);
+      self.touch(elem);
       return;
     }
 
     let mut new_head = Rc::new(RefCell::new(LRUNode {
-      n,
+      elem,
       prev: None,
       next: self.head.as_ref().map(|h| Rc::clone(h)),
     }));
@@ -83,10 +55,10 @@ impl LRU {
 
     self.head = Some(Rc::clone(&new_head));
 
-    self.index.insert(n, new_head);
+    self.index.insert(elem, new_head);
   }
 
-  pub fn dequeue(&mut self) -> Option<usize> {
+  pub fn dequeue(&mut self) -> Option<T> {
     if let Some(tail) = self.tail {
       if let Some(prev) = tail.borrow_mut().prev.as_ref().map(|p| Weak::upgrade(p).unwrap()) {
         prev.borrow_mut().next = None;
@@ -95,15 +67,15 @@ impl LRU {
         self.head = None;
         self.tail = None;
       }
-      self.index.remove(&tail.borrow().n);
-      Some(tail.borrow().n)
+      self.index.remove(&tail.borrow().elem);
+      Some(tail.borrow().elem)
     } else { // list is empty
       None
     }
   }
 
-  pub fn touch(&mut self, n: usize) {
-    if let Some(node) = self.index.get(&n).as_ref().map(|node| Rc::clone(node)) {
+  pub fn touch(&mut self, elem: T)  {
+    if let Some(node) = self.index.get(&elem).as_ref().map(|node| Rc::clone(node)) {
       // unlink node
       if let Some(prev) = node.borrow_mut().prev.as_ref().map(|p| Weak::upgrade(p).unwrap()) {
         if let Some(next) = node.borrow_mut().next {
@@ -125,8 +97,8 @@ impl LRU {
         unreachable!(); // data structure is in an inconsistent state
       }
     } else { // no such element was encountered
-      warn!("Attempted to touch {}, which was not in the LRU cache", n);
-      self.enqueue(n);
+      warn!("Attempted to touch {:?}, which was not in the LRU cache", elem);
+      self.enqueue(elem);
     }
   }
 }
@@ -134,20 +106,6 @@ impl LRU {
 #[cfg(test)]
 mod tests {
   use super::*;
-
-  #[test]
-  fn sieve_primes() {
-    let mut sieve = Sieve::new();
-    assert_eq!(sieve.sieve(100), &[
-      2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41,
-      43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97,
-    ]);
-
-    assert_eq!(sieve.sieve(101), &[
-      2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41,
-      43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97, 101,
-    ]);
-  }
 
   #[test]
   fn lru_cache_eviction_strategy() {

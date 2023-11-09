@@ -1,32 +1,31 @@
+use crate::{
+  data::{BuiltinFn, Data, SymbolTable},
+  stdlib,
+  util::LRU,
+};
 use log::*;
+use prime_factorization::Factorization;
 use std::{
   collections::HashMap,
   fmt::Write,
   rc::Rc,
-};
-use crate::{
-  data::{BuiltinFn, Data, SymbolTable},
-  stdlib,
-  util::{LRU, Sieve},
 };
 
 #[derive(Debug)]
 pub struct VM {
   builtins: HashMap<Rc<str>, Rc<dyn BuiltinFn>>,
   pub symbols: SymbolTable,
-  prime_sieve: Sieve,
-  factors_memo: HashMap<usize, Vec<usize>>,
-  factors_eviction_queue: LRU,
+  factors_memo: HashMap<u64, Vec<u64>>,
+  factors_eviction_queue: LRU<u64>,
 }
 
 impl VM {
-  const MEMO_SZ: usize = 1000;
+  const MEMO_SZ: usize = 10_000;
 
   pub fn new() -> Self {
     Self {
       builtins: HashMap::new(),
       symbols: SymbolTable::new(),
-      prime_sieve: Sieve::new(),
       factors_memo: HashMap::with_capacity(Self::MEMO_SZ),
       factors_eviction_queue: LRU::with_capacity(Self::MEMO_SZ),
     }
@@ -64,17 +63,7 @@ impl VM {
       self.factors_memo.remove(&evict);
     }
 
-    let mut a = n;
-    let mut factors = Vec::new();
-
-    for &p in self.prime_sieve.sieve(n as usize) {
-      if a == 0 || a == 1 { break; }
-
-      while a % p == 0 {
-        a /= p;
-        factors.push(p);
-      }
-    }
+    let Factorization { factors, .. } = Factorization::run(n);
 
     self.factors_memo.insert(n, factors);
     self.factors_eviction_queue.enqueue(n);
