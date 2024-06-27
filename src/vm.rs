@@ -6,6 +6,7 @@ use crate::{
 use log::*;
 use prime_factorization::Factorization;
 use std::{
+  cell::{Ref, RefCell},
   collections::HashMap,
   fmt::Write,
   rc::Rc,
@@ -15,8 +16,8 @@ use std::{
 pub struct VM {
   builtins: HashMap<Rc<str>, Rc<dyn BuiltinFn>>,
   pub symbols: SymbolTable,
-  factors_memo: HashMap<u64, Vec<u64>>,
-  factors_eviction_queue: LRU<u64>,
+  factors_memo: RefCell<HashMap<u64, Vec<u64>>>,
+  factors_eviction_queue: RefCell<LRU<u64>>,
 }
 
 impl VM {
@@ -26,17 +27,17 @@ impl VM {
     Self {
       builtins: HashMap::new(),
       symbols: SymbolTable::new(),
-      factors_memo: HashMap::with_capacity(Self::MEMO_SZ),
-      factors_eviction_queue: LRU::with_capacity(Self::MEMO_SZ),
+      factors_memo: RefCell::new(HashMap::with_capacity(Self::MEMO_SZ)),
+      factors_eviction_queue: RefCell::new(LRU::with_capacity(Self::MEMO_SZ)),
     }
   }
 
-  pub fn def_builtin<F: BuiltinFn, S: AsRef<str>>(&mut self, name: S, code: F) {
+  pub fn def_builtin<F: BuiltinFn + 'static, S: AsRef<str>>(&mut self, name: S, code: F) {
     let sym = self.symbols.add(name);
-    if let Data::Symbol(name) = sym {
-      let replaced = self.builtins.insert(Rc::clone(&name), Rc::new(code));
+    if let Data::Symbol(ref name) = sym {
+      let replaced = self.builtins.insert(Rc::clone(name), Rc::new(code));
       if replaced.is_some() {
-        warn!("Redefined {}, a builtin function. You probably don't want to do this.", name);
+        error!("Redefined {}, a builtin function. You probably don't want to do this.", name);
       }
     } else {
       unreachable!();
@@ -48,26 +49,29 @@ impl VM {
     named_code.map(|(name, code)| Data::Builtin(Rc::clone(name), Rc::clone(code)))
   }
 
-  pub fn factorize(&mut self, n: u64) -> &[u64] {
-    if let Some(factors) = self.factors_memo.get(&n) {
+  pub fn factorize(&self, n: u64) -> Ref<'_, Vec<u64>> {
+    if self.factors_memo.borrow().contains_key(&n) {
       // update LRU
-      self.factors_eviction_queue.touch(n);
-      return factors;
+      self.factors_eviction_queue.borrow_mut().touch(&n);
+      let borrow = self.factors_memo.borrow();
+      return Ref::map(borrow, |m| m.get(&n).unwrap());
     }
 
     // check for eviction
-    debug_assert!(self.factors_memo.len() <= Self::MEMO_SZ);
-    debug_assert!(self.factors_memo.len() == self.factors_eviction_queue.len());
-    if self.factors_memo.len() >= Self::MEMO_SZ {
-      let evict = self.factors_eviction_queue.dequeue().unwrap();
-      self.factors_memo.remove(&evict);
+    let len = self.factors_memo.borrow().len();
+    debug_assert!(len <= Self::MEMO_SZ);
+    debug_assert!(len == self.factors_eviction_queue.borrow().len());
+    if len >= Self::MEMO_SZ {
+      let evict = self.factors_eviction_queue.borrow_mut().dequeue().unwrap();
+      self.factors_memo.borrow_mut().remove(&evict);
     }
 
     let Factorization { factors, .. } = Factorization::run(n);
 
-    self.factors_memo.insert(n, factors);
-    self.factors_eviction_queue.enqueue(n);
-    &self.factors_memo.get(&n).unwrap()[..]
+    self.factors_memo.borrow_mut().insert(n, factors);
+    self.factors_eviction_queue.borrow_mut().enqueue(n);
+    let borrow = self.factors_memo.borrow();
+    Ref::map(borrow, |m| m.get(&n).unwrap())
   }
 
   pub fn gcf(&mut self, m: u64, n: u64) -> u64 {
@@ -171,7 +175,7 @@ mod tests {
   use gc::GcCell;
   use std::collections::VecDeque;
   use crate::{
-    data::{Data, SymbolTable},
+    data::Data,
     vm::VM,
   };
 
@@ -182,24 +186,24 @@ mod tests {
     let mut vm = VM::new();
 
     let symbol = vm.symbols.add("jeremy");
-    assert_eq!(vm.display_data(symbol), "jeremy".to_owned());
+    assert_eq!(vm.display_data(&symbol), "jeremy".to_owned());
 
     let string = String("upright bass".to_owned());
-    assert_eq!(vm.display_data(string), "\"upright bass\"");
+    assert_eq!(vm.display_data(&string), "\"upright bass\"");
 
     let tru = Boolean(true);
     let fals = Boolean(false);
-    assert_eq!(vm.display_data(tru), "#true");
-    assert_eq!(vm.display_data(fals), "#false");
+    assert_eq!(vm.display_data(&tru), "#true");
+    assert_eq!(vm.display_data(&fals), "#false");
 
     let int = Integer(35);
-    assert_eq!(vm.display_data(int), "35");
+    assert_eq!(vm.display_data(&int), "35");
 
     let float = Real(123.4);
-    assert_eq!(vm.display_data(float), "123.4");
+    assert_eq!(vm.display_data(&float), "123.4");
 
     let nil = Data::nil();
-    assert_eq!(vm.display_data(nil), "()");
+    assert_eq!(vm.display_data(&nil), "()");
 
     let list = List(
       [symbol, string, tru, fals, int, float, nil]
@@ -207,7 +211,7 @@ mod tests {
         .map(GcCell::new)
         .collect::<VecDeque<_>>()
     );
-    assert_eq!(vm.display_data(list), "(jeremy \"upright bass\" #true #false 35 123.4)");
+    assert_eq!(vm.display_data(&list), "(jeremy \"upright bass\" #true #false 35 123.4)");
 
     let dotted = List(
       [Real(12.0), String("oy".into()), Data::nil(), Real(0.23456)]
@@ -215,7 +219,7 @@ mod tests {
         .map(GcCell::new)
         .collect::<VecDeque<_>>()
     );
-    assert_eq!(vm.display_data(dotted), "(12 \"oy\" () . 0.23456)");
+    assert_eq!(vm.display_data(&dotted), "(12 \"oy\" () . 0.23456)");
   }
 
   #[test]
@@ -225,25 +229,25 @@ mod tests {
     let mut vm = VM::new();
 
     let complex = Complex(123.4, 5.0);
-    assert_eq!(vm.display_data(complex), "123.4+5.0i");
+    assert_eq!(vm.display_data(&complex), "123.4+5.0i");
 
     let complex2 = Complex(123.4, -5.0);
-    assert_eq!(vm.display_data(complex2), "123.4-5.0i");
+    assert_eq!(vm.display_data(&complex2), "123.4-5.0i");
 
     let complex3 = Complex(0.0, -5.0);
-    assert_eq!(vm.display_data(complex3), "-5.0i");
+    assert_eq!(vm.display_data(&complex3), "-5.0i");
 
     let complex4 = Complex(1.1, 0.0);
-    assert_eq!(vm.display_data(complex4), "1.1");
+    assert_eq!(vm.display_data(&complex4), "1.1");
 
-    let rational = Rational(3, -4);
-    assert_eq!(vm.display_data(rational), "-3/4");
+    let rational = Rational(-3, 4);
+    assert_eq!(vm.display_data(&rational), "-3/4");
 
     let rational2 = Rational(0, 4);
-    assert_eq!(vm.display_data(rational2), "0");
+    assert_eq!(vm.display_data(&rational2), "0");
 
     let rational3 = Rational(4, 1);
-    assert_eq!(vm.display_data(rational3), "4");
+    assert_eq!(vm.display_data(&rational3), "4");
   }
 }
 
