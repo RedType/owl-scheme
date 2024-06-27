@@ -6,7 +6,7 @@ use crate::{
 use log::*;
 use prime_factorization::Factorization;
 use std::{
-  cell::{Ref, RefCell},
+  cell::{RefCell, UnsafeCell},
   collections::HashMap,
   fmt::Write,
   rc::Rc,
@@ -16,7 +16,7 @@ use std::{
 pub struct VM {
   builtins: HashMap<Rc<str>, Rc<dyn BuiltinFn>>,
   pub symbols: SymbolTable,
-  factors_memo: RefCell<HashMap<u64, Vec<u64>>>,
+  factors_memo: UnsafeCell<HashMap<u64, Vec<u64>>>,
   factors_eviction_queue: RefCell<LRU<u64>>,
 }
 
@@ -27,7 +27,7 @@ impl VM {
     Self {
       builtins: HashMap::new(),
       symbols: SymbolTable::new(),
-      factors_memo: RefCell::new(HashMap::with_capacity(Self::MEMO_SZ)),
+      factors_memo: UnsafeCell::new(HashMap::with_capacity(Self::MEMO_SZ)),
       factors_eviction_queue: RefCell::new(LRU::with_capacity(Self::MEMO_SZ)),
     }
   }
@@ -49,29 +49,30 @@ impl VM {
     named_code.map(|(name, code)| Data::Builtin(Rc::clone(name), Rc::clone(code)))
   }
 
-  pub fn factorize(&self, n: u64) -> Ref<'_, Vec<u64>> {
-    if self.factors_memo.borrow().contains_key(&n) {
+  // SAFETY: the factors_memo pointer is only used in this function, so
+  // it should be safe to use like this right???
+  pub fn factorize(&self, n: u64) -> &[u64] {
+    let factors_memo = self.factors_memo.get();
+    if unsafe { (*factors_memo).contains_key(&n) } {
       // update LRU
       self.factors_eviction_queue.borrow_mut().touch(&n);
-      let borrow = self.factors_memo.borrow();
-      return Ref::map(borrow, |m| m.get(&n).unwrap());
+      return unsafe { (*factors_memo).get(&n).unwrap() };
     }
 
     // check for eviction
-    let len = self.factors_memo.borrow().len();
+    let len = unsafe { (*factors_memo).len() };
     debug_assert!(len <= Self::MEMO_SZ);
     debug_assert!(len == self.factors_eviction_queue.borrow().len());
     if len >= Self::MEMO_SZ {
       let evict = self.factors_eviction_queue.borrow_mut().dequeue().unwrap();
-      self.factors_memo.borrow_mut().remove(&evict);
+      unsafe { (*factors_memo).remove(&evict); }
     }
 
     let Factorization { factors, .. } = Factorization::run(n);
 
-    self.factors_memo.borrow_mut().insert(n, factors);
+    unsafe { let _ = (*factors_memo).insert(n, factors); }
     self.factors_eviction_queue.borrow_mut().enqueue(n);
-    let borrow = self.factors_memo.borrow();
-    Ref::map(borrow, |m| m.get(&n).unwrap())
+    unsafe { &(*factors_memo).get(&n).unwrap() }
   }
 
   pub fn gcf(&mut self, m: u64, n: u64) -> u64 {
@@ -138,8 +139,7 @@ impl VM {
         } else if *r == 0.0 {
           write!(f, "{}i", *i)
         } else {
-          let sign = if *i < 0.0 { "-" } else { "+" };
-          write!(f, "{}{}{}i", *r, sign, *i)
+          write!(f, "{}{:+}i", *r, *i)
         }
       },
       Real(x) => write!(f, "{}", x),
@@ -229,13 +229,13 @@ mod tests {
     let mut vm = VM::new();
 
     let complex = Complex(123.4, 5.0);
-    assert_eq!(vm.display_data(&complex), "123.4+5.0i");
+    assert_eq!(vm.display_data(&complex), "123.4+5i");
 
     let complex2 = Complex(123.4, -5.0);
-    assert_eq!(vm.display_data(&complex2), "123.4-5.0i");
+    assert_eq!(vm.display_data(&complex2), "123.4-5i");
 
     let complex3 = Complex(0.0, -5.0);
-    assert_eq!(vm.display_data(&complex3), "-5.0i");
+    assert_eq!(vm.display_data(&complex3), "-5i");
 
     let complex4 = Complex(1.1, 0.0);
     assert_eq!(vm.display_data(&complex4), "1.1");
@@ -248,6 +248,34 @@ mod tests {
 
     let rational3 = Rational(4, 1);
     assert_eq!(vm.display_data(&rational3), "4");
+  }
+
+  #[test]
+  fn factorize() {
+    let vm = VM::new();
+
+    let f200 = vm.factorize(200);
+    assert_eq!(f200, &[2, 2, 2, 5, 5]);
+
+    let f5_7_11 = vm.factorize(5 * 7 * 11);
+    assert_eq!(f5_7_11, &[5, 7, 11]);
+
+    let f2 = vm.factorize(2);
+    assert_eq!(f2, &[2]);
+
+    let f7757_13 = vm.factorize(7757 * 13);
+    assert_eq!(f7757_13, &[13, 7757]);
+  }
+
+  #[test]
+  fn gcf() {
+    let mut vm = VM::new();
+
+    let g5 = vm.gcf(5, 15);
+    assert_eq!(g5, 5);
+
+    let g1 = vm.gcf(7757 * 7, 27);
+    assert_eq!(g1, 1);
   }
 }
 
