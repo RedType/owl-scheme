@@ -8,6 +8,7 @@ authors = ["Will Young <wil.wyo@gmail.com>"]
 gc = { version = "^0.5", features = ["derive"] }
 log = "0.4.20"
 prime_factorization = "1.0.4"
+thiserror = "1.0.61"
 
 [profile.dev]
 opt-level = 1
