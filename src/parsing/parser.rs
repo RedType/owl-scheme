@@ -108,7 +108,7 @@ impl VM {
 #[cfg(test)]
 mod tests {
   use crate::{
-    data::{Data, SymbolTable},
+    data::Data,
     parsing::error::ParseErrorKind,
     vm::VM,
   };
