@@ -1,32 +1,34 @@
 use std::{
-  cell::RefCell,
   collections::HashMap,
   fmt::Debug,
-  hash::Hash,
-  rc::{Rc, Weak},
+  hash::{DefaultHasher, Hash, Hasher},
+  marker::PhantomData,
+  ptr::NonNull,
 };
 use log::*;
 
 #[derive(Debug)]
-pub struct LRU<T: Debug + Eq + Hash> {
-  index: HashMap<T, Rc<RefCell<LRUNode<T>>>>,
-  head: Option<Rc<RefCell<LRUNode<T>>>>,
-  tail: Option<Rc<RefCell<LRUNode<T>>>>,
+pub struct LRU<T: Debug + Hash> {
+  index: HashMap<u64, NonNull<LRUNode<T>>>,
+  head: Option<NonNull<LRUNode<T>>>,
+  tail: Option<NonNull<LRUNode<T>>>,
+  phantom: PhantomData<T>,
 }
 
 #[derive(Debug)]
-struct LRUNode<T: Debug + Eq + Hash> {
+struct LRUNode<T: Debug + Hash> {
   elem: T,
-  prev: Option<Weak<RefCell<LRUNode<T>>>>,
-  next: Option<Rc<RefCell<LRUNode<T>>>>,
+  prev: Option<NonNull<LRUNode<T>>>,
+  next: Option<NonNull<LRUNode<T>>>,
 }
 
-impl<T: Debug + Eq + Hash> LRU<T> {
+impl<T: Debug + Hash> LRU<T> {
   pub fn with_capacity(n: usize) -> Self {
     Self {
       index: HashMap::with_capacity(n),
       head: None,
       tail: None,
+      phantom: PhantomData,
     }
   }
 
@@ -35,70 +37,100 @@ impl<T: Debug + Eq + Hash> LRU<T> {
   }
 
   pub fn enqueue(&mut self, elem: T) {
-    if self.index.contains_key(&elem) {
+    let mut hasher = DefaultHasher::new();
+    elem.hash(&mut hasher);
+    let hash = hasher.finish();
+
+    if self.index.contains_key(&hash) {
       warn!("Attempted to enqueue already-existing cache element {:?}", elem);
-      self.touch(elem);
+      self.touch(&elem);
       return;
     }
 
-    let mut new_head = Rc::new(RefCell::new(LRUNode {
+    let new_head = Box::new(LRUNode {
       elem,
       prev: None,
-      next: self.head.as_ref().map(|h| Rc::clone(h)),
-    }));
+      next: self.head,
+    });
+    let new_head_ptr = NonNull::from(Box::leak(new_head));
 
-    if let Some(h) = self.head {
-      h.borrow_mut().prev = Some(Rc::downgrade(&new_head));
-    } else {
-      self.tail = Some(Rc::clone(&new_head));
+    self.index.insert(hash, new_head_ptr);
+
+    // push node to front
+    unsafe {
+      match self.head {
+        None => self.tail = Some(new_head_ptr),
+        Some(head) => (*head.as_ptr()).prev = Some(new_head_ptr),
+      }
     }
-
-    self.head = Some(Rc::clone(&new_head));
-
-    self.index.insert(elem, new_head);
+    self.head = Some(new_head_ptr);
   }
 
   pub fn dequeue(&mut self) -> Option<T> {
-    if let Some(tail) = self.tail {
-      if let Some(prev) = tail.borrow_mut().prev.as_ref().map(|p| Weak::upgrade(p).unwrap()) {
-        prev.borrow_mut().next = None;
-        self.tail = Some(prev);
-      } else { // tail is our last element
-        self.head = None;
-        self.tail = None;
+    let tail = if let Some(tail) = self.tail {
+        tail
+    } else {
+        return None;
+    };
+
+    // get hash
+    let hash = unsafe {
+      let mut hasher = DefaultHasher::new();
+      (*tail.as_ptr()).elem.hash(&mut hasher);
+      hasher.finish()
+    };
+
+    // remove element from the index
+    self.index.remove(&hash);
+
+    // remove back node from the list
+    let elem = self.tail.map(|node| unsafe {
+      let node = Box::from_raw(node.as_ptr());
+      self.tail = node.prev;
+      match self.tail {
+        None => self.head = None,
+        Some(tail) => (*tail.as_ptr()).next = None,
       }
-      self.index.remove(&tail.borrow().elem);
-      Some(tail.borrow().elem)
-    } else { // list is empty
-      None
-    }
+      node.elem
+    });
+
+    elem
   }
 
-  pub fn touch(&mut self, elem: T)  {
-    if let Some(node) = self.index.get(&elem).as_ref().map(|node| Rc::clone(node)) {
-      // unlink node
-      if let Some(prev) = node.borrow_mut().prev.as_ref().map(|p| Weak::upgrade(p).unwrap()) {
-        if let Some(next) = node.borrow_mut().next {
-          prev.borrow_mut().next = Some(Rc::clone(&next));
-          next.borrow_mut().prev = Some(Rc::downgrade(&prev));
-        } else { // node is tail
-          prev.borrow_mut().next = None;
-          self.tail = Some(Rc::clone(&prev));
-        }
-      } else { // node is head
-        return; // no work to do
+  pub fn touch(&mut self, elem: &T) {
+    let mut hasher = DefaultHasher::new();
+    elem.hash(&mut hasher);
+    let hash = hasher.finish();
+
+    let node = if let Some(node) = self.index.get(&hash) {
+        *node
+    } else {
+        return;
+    };
+
+    // cut node out of list
+    unsafe {
+      let prev = (*node.as_ptr()).prev;
+      let next = (*node.as_ptr()).next;
+
+      if let Some(prev) = prev {
+        (*prev.as_ptr()).next = next;
       }
 
-      // relink node
-      if let Some(head) = self.head.as_ref().map(|h| Rc::clone(h)) {
-        node.borrow_mut().next = Some(Rc::clone(&head));
-        self.head = Some(Rc::clone(&node));
-      } else { // there is no head
-        unreachable!(); // data structure is in an inconsistent state
+      if let Some(next) = next {
+        (*next.as_ptr()).prev = prev;
       }
-    } else { // no such element was encountered
-      warn!("Attempted to touch {:?}, which was not in the LRU cache", elem);
-      self.enqueue(elem);
+    }
+
+    // push to front
+    unsafe {
+      match self.head {
+        None => self.tail = Some(node),
+        Some(head) => (*head.as_ptr()).prev = Some(node),
+      }
+
+      (*node.as_ptr()).next = self.head;
+      self.head = Some(node);
     }
   }
 }
@@ -127,22 +159,22 @@ mod tests {
     queue.enqueue(1);
     queue.enqueue(2);
     queue.enqueue(3);
-    queue.touch(2);
+    queue.touch(&2);
     assert_eq!(queue.dequeue(), Some(1));
     assert_eq!(queue.dequeue(), Some(3));
     assert_eq!(queue.dequeue(), Some(2));
     assert_eq!(queue.len(), 0);
 
     queue.enqueue(1);
-    queue.touch(1);
+    queue.touch(&1);
     assert_eq!(queue.len(), 1);
     assert_eq!(queue.dequeue(), Some(1));
     assert_eq!(queue.len(), 0);
 
     queue.enqueue(1);
     queue.enqueue(2);
-    queue.touch(1);
-    queue.touch(2);
+    queue.touch(&1);
+    queue.touch(&2);
     assert_eq!(queue.len(), 2);
     assert_eq!(queue.dequeue(), Some(1));
     assert_eq!(queue.dequeue(), Some(2));
