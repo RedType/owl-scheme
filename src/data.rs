@@ -1,13 +1,15 @@
+use crate::error::ArithmeticError;
 use std::{
   collections::{HashSet, VecDeque},
+  error::Error,
   fmt,
   rc::Rc,
 };
 use gc::{Finalize, GcCell, Trace};
 
 // trait alias
-pub trait BuiltinFn: FnMut(&mut Data) -> Result<Data, ()> {}
-impl<T: FnMut(&mut Data) -> Result<Data, ()>> BuiltinFn for T {}
+pub trait BuiltinFn: FnMut(&mut VecDeque<GcCell<Data>>) -> Result<Data, Box<dyn Error>> {}
+impl<T: FnMut(&mut VecDeque<GcCell<Data>>) -> Result<Data, Box<dyn Error>>> BuiltinFn for T {}
 
 impl fmt::Debug for dyn BuiltinFn {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -40,6 +42,16 @@ impl Data {
       xs.is_empty()
     } else {
       false
+    }
+  }
+
+  pub fn clone_numeric(&self) -> Result<Data, ArithmeticError> {
+    match *self {
+      Self::Integer(i) => Ok(Self::Integer(i)),
+      Self::Real(r) => Ok(Self::Real(r)),
+      Self::Rational(n, d) => Ok(Self::Rational(n, d)),
+      Self::Complex(r, i) => Ok(Self::Complex(r, i)),
+      _ => Err(ArithmeticError::NonNumericArgument),
     }
   }
 }
