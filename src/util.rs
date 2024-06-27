@@ -151,9 +151,9 @@ mod tests {
     assert_eq!(queue.len(), 3);
     assert_eq!(queue.dequeue(), Some(1));
     assert_eq!(queue.len(), 2);
-    assert_eq!(queue.dequeue(), Some(3));
-    assert_eq!(queue.len(), 1);
     assert_eq!(queue.dequeue(), Some(2));
+    assert_eq!(queue.len(), 1);
+    assert_eq!(queue.dequeue(), Some(3));
     assert_eq!(queue.len(), 0);
 
     queue.enqueue(1);
