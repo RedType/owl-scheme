@@ -37,10 +37,7 @@ impl<T: Debug + Hash> LRU<T> {
   }
 
   pub fn enqueue(&mut self, elem: T) {
-    let mut hasher = DefaultHasher::new();
-    elem.hash(&mut hasher);
-    let hash = hasher.finish();
-
+    let hash = hash(&elem);
     if self.index.contains_key(&hash) {
       warn!("Attempted to enqueue already-existing cache element {:?}", elem);
       self.touch(&elem);
@@ -50,7 +47,7 @@ impl<T: Debug + Hash> LRU<T> {
     let new_head = Box::new(LRUNode {
       elem,
       prev: None,
-      next: self.head,
+      next: None,
     });
     let new_head_ptr = NonNull::from(Box::leak(new_head));
 
@@ -58,81 +55,94 @@ impl<T: Debug + Hash> LRU<T> {
 
     // push node to front
     unsafe {
-      match self.head {
-        None => self.tail = Some(new_head_ptr),
-        Some(head) => (*head.as_ptr()).prev = Some(new_head_ptr),
-      }
+        self.push_node(new_head_ptr);
     }
-    self.head = Some(new_head_ptr);
-  }
-
-  pub fn dequeue(&mut self) -> Option<T> {
-    let tail = if let Some(tail) = self.tail {
-        tail
-    } else {
-        return None;
-    };
-
-    // get hash
-    let hash = unsafe {
-      let mut hasher = DefaultHasher::new();
-      (*tail.as_ptr()).elem.hash(&mut hasher);
-      hasher.finish()
-    };
-
-    // remove element from the index
-    self.index.remove(&hash);
-
-    // remove back node from the list
-    let elem = self.tail.map(|node| unsafe {
-      let node = Box::from_raw(node.as_ptr());
-      self.tail = node.prev;
-      match self.tail {
-        None => self.head = None,
-        Some(tail) => (*tail.as_ptr()).next = None,
-      }
-      node.elem
-    });
-
-    elem
   }
 
   pub fn touch(&mut self, elem: &T) {
-    let mut hasher = DefaultHasher::new();
-    elem.hash(&mut hasher);
-    let hash = hasher.finish();
+    let hash = hash(&elem);
 
-    let node = if let Some(node) = self.index.get(&hash) {
-        *node
+    if let Some(&node) = self.index.get(&hash) {
+      unsafe {
+        // cut node out of list
+        self.unlink_node(node);
+        // push to front
+        self.push_node(node);
+      }
     } else {
-        return;
-    };
-
-    // cut node out of list
-    unsafe {
-      let prev = (*node.as_ptr()).prev;
-      let next = (*node.as_ptr()).next;
-
-      if let Some(prev) = prev {
-        (*prev.as_ptr()).next = next;
-      }
-
-      if let Some(next) = next {
-        (*next.as_ptr()).prev = prev;
-      }
-    }
-
-    // push to front
-    unsafe {
-      match self.head {
-        None => self.tail = Some(node),
-        Some(head) => (*head.as_ptr()).prev = Some(node),
-      }
-
-      (*node.as_ptr()).next = self.head;
-      self.head = Some(node);
+      warn!("Tried to touch a value that's not present ({:?})", elem);
     }
   }
+
+  pub fn dequeue(&mut self) -> Option<T> {
+    // get tail node
+    let node = if let Some(tail) = self.tail {
+      tail
+    } else {
+      return None;
+    };
+
+    // unlink tail node
+    unsafe {
+      self.unlink_node(node);
+    }
+
+    // box node so it can be dropped
+    let node_boxed = unsafe { Box::from_raw(node.as_ptr()) };
+    // move element out of node
+    let elem = node_boxed.elem;
+    // get element hash
+    let hash = unsafe { hash(&(*node.as_ptr()).elem) };
+    // remove elem from index
+    let _ = self.index.remove(&hash);
+
+    Some(elem)
+  }
+
+  unsafe fn push_node(&mut self, node: NonNull<LRUNode<T>>) {
+    // connect node to head
+    (*node.as_ptr()).prev = None;
+    (*node.as_ptr()).next = self.head;
+
+    // connect list to node
+    match self.head {
+      None => self.tail = Some(node),
+      Some(head) => (*head.as_ptr()).prev = Some(node),
+    }
+
+    self.head = Some(node);
+  }
+
+  unsafe fn unlink_node(&mut self, node: NonNull<LRUNode<T>>) {
+    match (*node.as_ptr()).prev {
+      Some(prev) => (*prev.as_ptr()).next = (*node.as_ptr()).next,
+      None => self.head = (*node.as_ptr()).next,
+    }
+
+    match (*node.as_ptr()).next {
+      Some(next) => (*next.as_ptr()).prev = (*node.as_ptr()).prev,
+      None => self.tail = (*node.as_ptr()).prev,
+    }
+
+    (*node.as_ptr()).next = None;
+    (*node.as_ptr()).prev = None;
+  }
+}
+
+impl<T: Debug + Hash> Drop for LRU<T> {
+  fn drop(&mut self) {
+    while let Some(node) = self.head {
+      let node = unsafe { Box::from_raw(node.as_ptr()) };
+      self.head = node.next;
+    }
+  }
+}
+
+#[inline]
+fn hash<T: Hash>(t: &T) -> u64 {
+  let mut hasher = DefaultHasher::new();
+  t.hash(&mut hasher);
+  hasher.finish()
 }
 
 #[cfg(test)]
