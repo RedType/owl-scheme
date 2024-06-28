@@ -3,7 +3,7 @@ use std::{
   iter::Peekable,
 };
 use crate::{
-  data::{Data, SymbolTable},
+  data::{Data, GcData, SymbolTable},
   parsing::{
     Info,
     lexer::{Lexeme, LexItem},
@@ -11,14 +11,14 @@ use crate::{
   },
   vm::VM,
 };
-use gc::GcCell;
+use gc::{Gc, GcCell};
 
 fn parse_list<I: Iterator<Item = LexItem>>(
   lexemes: &mut Peekable<I>,
   symbols: &mut SymbolTable,
   head_info: Info,
 ) -> Result<Data, ParseError> {
-  let mut list: VecDeque<GcCell<Data>> = VecDeque::new();
+  let mut list: VecDeque<GcData> = VecDeque::new();
   let mut dotted = false;
 
   loop {
@@ -33,7 +33,7 @@ fn parse_list<I: Iterator<Item = LexItem>>(
       Some(LexItem(Lexeme::RParen, _)) => {
         // end list with nil (if it isn't already nil)
         if !dotted && !list.is_empty() {
-          list.push_back(GcCell::new(Data::nil()));
+          list.push_back(Gc::new(GcCell::new(Data::nil())));
         }
         lexemes.next();
         return Ok(Data::List(list));
@@ -50,7 +50,7 @@ fn parse_list<I: Iterator<Item = LexItem>>(
           }
         }
 
-        list.push_back(GcCell::new(next_data));
+        list.push_back(Gc::new(GcCell::new(next_data)));
       },
     }
   }
@@ -77,9 +77,9 @@ fn parse_rec<I: Iterator<Item = LexItem>>(
         return Err(ParseError(ParseErrorKind::QuotedRParen, *info));
       }
       Data::List([
-        GcCell::new(symbols.add("quote")),
-        GcCell::new(parse_rec(lexemes, symbols)?),
-        GcCell::new(Data::nil())
+        Gc::new(GcCell::new(symbols.add("quote"))),
+        Gc::new(GcCell::new(parse_rec(lexemes, symbols)?)),
+        Gc::new(GcCell::new(Data::nil())),
       ].into())
     },
 
@@ -112,11 +112,11 @@ mod tests {
     parsing::error::ParseErrorKind,
     vm::VM,
   };
-  use gc::GcCell;
+  use gc::{Gc, GcCell};
 
   macro_rules! l {
     [$($x:expr),+$(,)?] => {
-      Data::List([$(GcCell::new($x)),+].into())
+      Data::List([$(Gc::new(GcCell::new($x))),+].into())
     }
   }
 
