@@ -1,14 +1,18 @@
 use crate::{
-  data::{BuiltinFn, Data, SymbolTable},
+  data::{BuiltinFn, Data, Env, GcData, SymbolTable},
+  error::EvalError,
   stdlib,
   util::LRU,
 };
+use gc::{Gc, GcCell};
 use log::*;
 use prime_factorization::Factorization;
 use std::{
   cell::{RefCell, UnsafeCell},
   collections::HashMap,
   fmt::Write,
+  hash::{DefaultHasher, Hash, Hasher},
+  ptr,
   rc::Rc,
 };
 
@@ -158,7 +162,158 @@ impl VM {
       },
       Integer(x) => write!(f, "{}", x),
       Builtin(name, _) => write!(f, "<builtin fn {}>", name),
+      Procedure(name, args, proc) => {
+        let mut hasher = DefaultHasher::new();
+        for arg in args {
+          arg.hash(&mut hasher);
+        }
+        ptr::hash(proc, &mut hasher);
+        let hash = hasher.finish() % 16u64.pow(6);
+        if let Some(name) = name {
+          write!(f, "<procedure {} {:x}>", name, hash)
+        } else {
+          write!(f, "<procedure {:x}>", hash)
+        }
+      },
     }.unwrap();
+  }
+
+  pub fn eval(&self, env: &Rc<Env>, expr: GcData) -> Result<GcData, EvalError> {
+    use Data::*;
+
+    match *expr.borrow() {
+      // self-evaluating expressions
+      Boolean(_)
+      | String(_)
+      | Complex(_, _)
+      | Real(_)
+      | Rational(_, _)
+      | Integer(_)
+      | Builtin(_, _)
+      | Procedure(_, _, _) => Ok(Gc::clone(&expr)),
+
+      // variable lookup
+      Symbol(ref name) => env.lookup(name).ok_or(EvalError::UnboundSymbol),
+
+      // function application & special forms
+      List(ref exps) => match exps.front().as_ref() {
+        None => Err(EvalError::NonFunctionApplication),
+        Some(gcdata) => match *gcdata.borrow() {
+          ///////////////////
+          // special forms //
+          ///////////////////
+
+          Symbol(ref s) if *s == "lambda".into() => {
+            // get lambda name, if applicable
+            let name = if exps.len() == 3 {
+              // this is an anonymous lambda (without a name)
+              None
+            } else if exps.len() == 4 {
+              // this lambda is named
+              if let Symbol(ref name) = *exps[1].borrow() {
+                Some(Rc::clone(name))
+              } else {
+                return Err(EvalError::InvalidLambdaName);
+              }
+            } else {
+              return Err(EvalError::InvalidSpecialForm);
+            };
+
+            // construct parameter list
+            let mut parameters = Vec::new();
+            if let List(ref ps) = *exps[1].borrow() {
+              parameters.reserve_exact(ps.len());
+              for p in ps {
+                if let Symbol(ref s) = *p.borrow() {
+                  parameters.push(Rc::clone(s));
+                } else {
+                  return Err(EvalError::InvalidParameter);
+                }
+              }
+            } else {
+              return Err(EvalError::InvalidParameterList);
+            }
+
+            // build procedure
+            let proc = Procedure(name, parameters, Gc::clone(&exps[2]));
+
+            Ok(Gc::new(GcCell::new(proc)))
+          },
+
+          Symbol(ref s) if *s == "quote".into() => {
+            if exps.len() != 2 {
+              Err(EvalError::InvalidSpecialForm)
+            } else {
+              Ok(Gc::clone(&exps[1]))
+            }
+          },
+
+          Symbol(ref s) if *s == "let".into() => {
+            todo!();
+          },
+
+          Symbol(ref s) if *s == "let*".into() => {
+            todo!();
+          },
+
+          Symbol(ref s) if *s == "letrec".into() => {
+            todo!();
+          },
+
+          Symbol(ref s) if *s == "define".into() => {
+            todo!();
+          },
+
+          Symbol(ref s) if *s == "set!".into() => {
+            if exps.len() != 2 {
+              Err(EvalError::InvalidSpecialForm)
+            } else {
+              let res = env.set(s, &exps[1]);
+              Ok(Gc::new(GcCell::new(Boolean(res))))
+            }
+          },
+
+          Symbol(ref s) if *s == "if".into() => {
+            todo!();
+          },
+
+          Symbol(ref s) if *s == "cond".into() => {
+            todo!();
+          },
+
+          Symbol(ref s) if *s == "case".into() => {
+            todo!();
+          },
+
+          Symbol(ref s) if *s == "and".into() => {
+            todo!();
+          },
+
+          Symbol(ref s) if *s == "or".into() => {
+            todo!();
+          },
+
+          Symbol(ref s) if *s == "begin".into() => {
+            todo!();
+          },
+
+          Symbol(ref s) if *s == "do".into() => {
+            todo!();
+          },
+
+          // procedure call
+          Procedure(ref _name, _, _) => {
+            todo!();
+          },
+
+          _ => Err(EvalError::NonFunctionApplication),
+        },
+      },
+    }
+  }
+
+  pub fn apply(&self, f: Data, args: Data) -> Data {
+    Data::nil()
   }
 }
 
@@ -172,7 +327,7 @@ impl Default for VM {
 
 #[cfg(test)]
 mod tests {
-  use gc::GcCell;
+  use gc::{Gc, GcCell};
   use std::collections::VecDeque;
   use crate::{
     data::Data,
@@ -209,6 +364,7 @@ mod tests {
       [symbol, string, tru, fals, int, float, nil]
         .into_iter()
         .map(GcCell::new)
+        .map(Gc::new)
         .collect::<VecDeque<_>>()
     );
     assert_eq!(vm.display_data(&list), "(jeremy \"upright bass\" #true #false 35 123.4)");
@@ -217,6 +373,7 @@ mod tests {
       [Real(12.0), String("oy".into()), Data::nil(), Real(0.23456)]
         .into_iter()
         .map(GcCell::new)
+        .map(Gc::new)
         .collect::<VecDeque<_>>()
     );
     assert_eq!(vm.display_data(&dotted), "(12 \"oy\" () . 0.23456)");
@@ -276,6 +433,9 @@ mod tests {
 
     let g1 = vm.gcf(7757 * 7, 27);
     assert_eq!(g1, 1);
+
+    let g4 = vm.gcf(4 * 7, 4 * 13);
+    assert_eq!(g4, 4);
   }
 }
 

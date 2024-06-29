@@ -28,6 +28,8 @@ pub enum Data {
   Boolean(bool),
   // first element is the fn name
   Builtin(Rc<str>, #[unsafe_ignore_trace] Rc<dyn BuiltinFn>),
+  // procedure name, parameter list, procedure code
+  Procedure(Option<Rc<str>>, Vec<Rc<str>>, GcData),
   // numbers
   Complex(f64, f64),
   Real(f64),
@@ -76,6 +78,7 @@ impl PartialEq for Data {
       (String(l), String(r)) => l == r,
       (Boolean(l), Boolean(r)) => l == r,
       (Builtin(_, l), Builtin(_, r)) => Rc::ptr_eq(l, r),
+      (Procedure(_, _, l), Procedure(_, _, r)) => Gc::ptr_eq(l, r),
       (Complex(lr, li), Complex(rr, ri)) => lr == rr && li == ri,
       (Real(l), Real(r)) => l == r,
       (Rational(_, _), Rational(_, _)) => unimplemented!("Rationals are unreduced"),
@@ -131,6 +134,17 @@ impl Env {
 
   pub fn bind(&self, name: &Rc<str>, value: &GcData) {
     let _ = self.bindings.borrow_mut().insert(Rc::clone(name), Gc::clone(value));
+  }
+
+  pub fn set(&self, name: &Rc<str>, value: &GcData) -> bool {
+    if let Some(old_value) = self.bindings.borrow_mut().get_mut(name) {
+      *old_value = Gc::clone(value);
+      true
+    } else if let Some(ref prev_scope) = self.prev_scope {
+      prev_scope.set(name, value)
+    } else {
+      false
+    }
   }
 
   pub fn lookup(&self, name: &Rc<str>) -> Option<GcData> {
