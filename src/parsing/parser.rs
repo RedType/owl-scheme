@@ -31,10 +31,15 @@ fn parse_list<I: Iterator<Item = LexItem>>(
         lexemes.next();
       },
       Some(LexItem(Lexeme::RParen, _)) => {
+        /* no longer ending lists with nil -- assume its presence
+         * this means that the dot lexeme is now meaningless,
+         * which is fine
+         *
         // end list with nil (if it isn't already nil)
         if !dotted && !list.is_empty() {
           list.push_back(Gc::new(GcCell::new(Data::nil())));
         }
+        */
         lexemes.next();
         return Ok(Data::List(list));
       },
@@ -79,7 +84,8 @@ fn parse_rec<I: Iterator<Item = LexItem>>(
       Data::List([
         Gc::new(GcCell::new(symbols.add("quote"))),
         Gc::new(GcCell::new(parse_rec(lexemes, symbols)?)),
-        Gc::new(GcCell::new(Data::nil())),
+        // no longer ending lists with nil
+        //Gc::new(GcCell::new(Data::nil())),
       ].into())
     },
 
@@ -146,7 +152,7 @@ mod tests {
   fn parse_funny_list() {
     let mut vm = VM::new();
     let actual = parse_str!(vm, "(())");
-    let expected = vec![l![Data::nil(), Data::nil()]];
+    let expected = vec![l![Data::nil(), /*Data::nil()*/]];
     assert_eq!(expected, actual);
   }
 
@@ -159,7 +165,7 @@ mod tests {
       vm.symbols.get("b").unwrap(),
       vm.symbols.get("c").unwrap(),
       vm.symbols.get("d").unwrap(),
-      Data::nil(),
+      //Data::nil(),
     ]];
     assert_eq!(expected, actual);
   }
@@ -169,13 +175,13 @@ mod tests {
     let mut vm = VM::new();
     let actual = parse_str!(vm, "(a)(b) 5.5 (c d)");
     let expected = vec![
-      l![vm.symbols.get("a").unwrap(), Data::nil()],
-      l![vm.symbols.get("b").unwrap(), Data::nil()],
+      l![vm.symbols.get("a").unwrap(), /*Data::nil()*/],
+      l![vm.symbols.get("b").unwrap(), /*Data::nil()*/],
       Data::Real(5.5),
       l![
         vm.symbols.get("c").unwrap(),
         vm.symbols.get("d").unwrap(),
-        Data::nil(),
+        //Data::nil(),
       ],
     ];
     assert_eq!(expected, actual);
@@ -190,7 +196,7 @@ mod tests {
       l![
         vm.symbols.get("b").unwrap(),
         vm.symbols.get("c").unwrap(),
-        Data::nil(),
+        //Data::nil(),
       ],
       vm.symbols.get("d").unwrap(),
     ]];
@@ -206,7 +212,7 @@ mod tests {
       l![
         vm.symbols.get("quote").unwrap(),
         vm.symbols.get("b").unwrap(),
-        Data::nil(),
+        //Data::nil(),
       ],
       l![
         vm.symbols.get("quote").unwrap(),
@@ -214,14 +220,14 @@ mod tests {
           l![
             vm.symbols.get("quote").unwrap(),
             vm.symbols.get("c").unwrap(),
-            Data::nil(),
+            //Data::nil(),
           ],
           vm.symbols.get("d").unwrap(),
-          Data::nil(),
+          //Data::nil(),
         ],
-        Data::nil(),
+        //Data::nil(),
       ],
-      Data::nil(),
+      //Data::nil(),
     ]];
     assert_eq!(expected, actual);
   }
