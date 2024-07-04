@@ -4,12 +4,28 @@ Scheme language interpreter
 ## Roadmap
 - [x] lexer
   - [x] tests
+  - [x] errors
 - [x] parser
-  - [ ] tests
+  - [x] tests
+  - [x] errors
 - [ ] eval & apply
-- [ ] environments
+  - [ ] special forms
+    - [x] `lambda`
+    - [x] `quote`
+    - [x] `define`, `set!`
+    - [ ] `if`
+    - [ ] `include`
+    - [ ] tests
+  - [ ] tests
+  - [ ] errors
+- [x] environments
 - [ ] standard procedures
 - [ ] continuations
 - [ ] tail recursion
 - [ ] standard library
 - [ ] numerical tower
+  - [x] prime factorization
+    - [x] LRU cache
+- [ ] repl
+- [ ] cli
+
