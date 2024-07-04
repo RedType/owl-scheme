@@ -5,7 +5,7 @@ use std::{
 
 use crate::{
   data::Data,
-  parsing::{Info, ParseError, ParseErrorKind},
+  error::{SourceInfo, LexError, VMError},
   vm::VM,
 };
 
@@ -42,7 +42,7 @@ impl PartialEq for Lexeme {
 impl Eq for Lexeme {}
 
 #[derive(Debug)]
-pub struct LexItem(pub Lexeme, pub Info);
+pub struct LexItem(pub Lexeme, pub SourceInfo);
 
 #[derive(Clone, Copy)]
 enum State {
@@ -59,7 +59,7 @@ enum State {
 }
 
 impl VM {
-  pub fn lex<I>(&mut self, source: I) -> Result<Vec<LexItem>, ParseError>
+  pub fn lex<I>(&mut self, source: I) -> Result<Vec<LexItem>, VMError>
   where
     I: IntoIterator<Item = char>,
   {
@@ -67,14 +67,14 @@ impl VM {
     let mut state = State::Start;
     // append a " " to end of input so that lexer can finish up
     let mut chars = source.into_iter().chain(" ".chars()).peekable();
-    let mut line  = 0u64;
-    let mut col   = 0u64;
-    let mut boundary_col = 0u64;
+    let mut line  = 0u32;
+    let mut col   = 0u32;
+    let mut boundary_col = 0u32;
     let mut scratch_pad = String::new();
     // for unshift
-    let mut prev_line: u64;
-    let mut prev_col: u64;
-    let mut prev_boundary_col = 0u64;
+    let mut prev_line: u32;
+    let mut prev_col: u32;
+    let mut prev_boundary_col = 0u32;
     // for numerics
     let mut negative = false;
 
@@ -129,7 +129,7 @@ impl VM {
       // pushes a lexeme into the result list, along with all the metadata
       macro_rules! push_lex {
         ($x:expr) => {
-          items.push(LexItem($x, Info {
+          items.push(LexItem($x, SourceInfo {
             line,
             col,
             boundary_col,
@@ -140,7 +140,7 @@ impl VM {
       // creates and wraps an error
       macro_rules! err {
         ($x:expr) => {
-          Err(ParseError($x, Info {
+          Err(VMError(Box::new($x), SourceInfo {
             line,
             col,
             boundary_col,
@@ -169,7 +169,7 @@ impl VM {
               scratch_pad.push(c);
             },
             c if c.is_control() =>
-              return err!(ParseErrorKind::IllegalCharacter(c)),
+              return err!(LexError::IllegalCharacter(c)),
             c => {
               state = State::BoolOrIdent;
               scratch_pad.push(c);
@@ -255,7 +255,7 @@ impl VM {
               state = State::Decimal;
             },
             c if c.is_alphabetic() =>
-              return err!(ParseErrorKind::InvalidNumber),
+              return err!(LexError::InvalidNumber),
             _ => {
               negative = false;
               push_lex!(Lexeme::Integer(0));
@@ -290,14 +290,14 @@ impl VM {
 
         State::Hexadecimal => {
           match ch {
-            '.' => return err!(ParseErrorKind::DotInNonDecimalNumeric),
+            '.' => return err!(LexError::DotInNonDecimalNumeric),
             '_' => (),
             c @ '(' | c @ ')' | c if c.is_whitespace() => {
               if let Ok(n) = i64::from_str_radix(&scratch_pad, 16) {
                 let final_n = if negative { -1 } else { 1 } * n;
                 push_lex!(Lexeme::Integer(final_n));
               } else {
-                return err!(ParseErrorKind::InvalidNumber);
+                return err!(LexError::InvalidNumber);
               }
 
               negative = false;
@@ -307,7 +307,7 @@ impl VM {
               continue;
             },
             c if c.is_digit(16) => scratch_pad.push(ch),
-            _ => return err!(ParseErrorKind::NonHexCharInHex),
+            _ => return err!(LexError::NonHexCharInHex),
           }
 
           shift!();
@@ -315,14 +315,14 @@ impl VM {
 
         State::Binary => {
           match ch {
-            '.' => return err!(ParseErrorKind::DotInNonDecimalNumeric),
+            '.' => return err!(LexError::DotInNonDecimalNumeric),
             '_' => (),
             c @ '(' | c @ ')' | c if c.is_whitespace() => {
               if let Ok(n) = i64::from_str_radix(&scratch_pad, 2) {
                 let final_n = if negative { -1 } else { 1 } * n;
                 push_lex!(Lexeme::Integer(final_n));
               } else {
-                return err!(ParseErrorKind::InvalidNumber);
+                return err!(LexError::InvalidNumber);
               }
 
               negative = false;
@@ -332,7 +332,7 @@ impl VM {
               continue;
             },
             c if c.is_digit(2) => scratch_pad.push(ch),
-            _ => return err!(ParseErrorKind::NonBinCharInBin),
+            _ => return err!(LexError::NonBinCharInBin),
           }
 
           shift!();
@@ -346,7 +346,7 @@ impl VM {
             '(' | ')' => do_conversion = true,
             c if c.is_whitespace() => do_conversion = true,
             c if c.is_digit(10) => scratch_pad.push(c),
-            _ => return err!(ParseErrorKind::NonDecCharInDec),
+            _ => return err!(LexError::NonDecCharInDec),
           }
 
           if do_conversion {
@@ -356,7 +356,7 @@ impl VM {
                 let final_n = if negative { -1.0 } else { 1.0 } * n;
                 push_lex!(Lexeme::Float(final_n));
               } else {
-                return err!(ParseErrorKind::InvalidNumber);
+                return err!(LexError::InvalidNumber);
               }
             } else {
               // if there's no . then it's an integer
@@ -364,7 +364,7 @@ impl VM {
                 let final_n = if negative { -1 } else { 1 } * n;
                 push_lex!(Lexeme::Integer(final_n));
               } else {
-                return err!(ParseErrorKind::InvalidNumber);
+                return err!(LexError::InvalidNumber);
               }
             }
 
@@ -387,7 +387,7 @@ impl VM {
 mod tests {
   use super::*;
   use crate::{
-    parsing::ParseErrorKind::*,
+    error::LexError::*,
     vm::VM,
   };
 
@@ -562,7 +562,7 @@ mod tests {
     assert_eq!(expected_underscored_int, actual_underscored_int);
 
     let illegal_decimal = lex_err!(vm, "35a7");
-    assert_eq!(NonDecCharInDec, illegal_decimal.0);
+    assert_eq!(NonDecCharInDec, *illegal_decimal.0.downcast::<LexError>().unwrap());
   }
 
   #[test]
@@ -577,10 +577,10 @@ mod tests {
     assert_eq!(expected_hex, actual_underscored_hex);
 
     let not_hex = lex_err!(vm, "0x");
-    assert_eq!(InvalidNumber, not_hex.0);
+    assert_eq!(InvalidNumber, *not_hex.0.downcast::<LexError>().unwrap());
 
     let illegal_hex = lex_err!(vm, "0xg");
-    assert_eq!(NonHexCharInHex, illegal_hex.0);
+    assert_eq!(NonHexCharInHex, *illegal_hex.0.downcast::<LexError>().unwrap());
   }
 
   #[test]
@@ -595,10 +595,10 @@ mod tests {
     assert_eq!(expected_bin, actual_underscored_bin);
 
     let not_bin = lex_err!(vm, "0b");
-    assert_eq!(InvalidNumber, not_bin.0);
+    assert_eq!(InvalidNumber, *not_bin.0.downcast::<LexError>().unwrap());
 
     let illegal_bin = lex_err!(vm, "0b37");
-    assert_eq!(NonBinCharInBin, illegal_bin.0);
+    assert_eq!(NonBinCharInBin, *illegal_bin.0.downcast::<LexError>().unwrap());
   }
 
   #[test]
@@ -617,7 +617,7 @@ mod tests {
     assert_eq!(expected_float_dot_postfix, actual_float_dot_postfix);
 
     let not_float = lex_err!(vm, "0.3.4");
-    assert_eq!(InvalidNumber, not_float.0);
+    assert_eq!(InvalidNumber, *not_float.0.downcast::<LexError>().unwrap());
   }
 
   #[test]

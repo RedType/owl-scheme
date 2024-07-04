@@ -1,4 +1,7 @@
-use crate::error::ArithmeticError;
+use crate::error::{
+  ArithmeticError,
+  SourceInfo,
+};
 use std::{
   cell::RefCell,
   collections::{HashMap, HashSet, VecDeque},
@@ -6,11 +9,18 @@ use std::{
   fmt,
   rc::Rc,
 };
-use gc::{Finalize, Gc, GcCell, Trace};
+use gc::{
+  Finalize,
+  Gc,
+  GcCell,
+  GcCellRef,
+  GcCellRefMut,
+  Trace,
+};
 
 // trait alias
-pub trait BuiltinFn: FnMut(&mut VecDeque<GcCell<Data>>) -> Result<Data, Box<dyn Error>> {}
-impl<T: FnMut(&mut VecDeque<GcCell<Data>>) -> Result<Data, Box<dyn Error>>> BuiltinFn for T {}
+pub trait BuiltinFn: Fn(&[Gc<DataCell>]) -> Result<Data, Box<dyn Error>> {}
+impl<T: Fn(&[Gc<DataCell>]) -> Result<Data, Box<dyn Error>>> BuiltinFn for T {}
 
 impl fmt::Debug for dyn BuiltinFn {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -18,18 +28,49 @@ impl fmt::Debug for dyn BuiltinFn {
   }
 }
 
-pub type GcData = Gc<GcCell<Data>>;
+#[derive(Clone, Debug, Finalize, Trace)]
+pub struct DataCell {
+  pub data: GcCell<Data>,
+  pub info: SourceInfo,
+}
+
+impl DataCell {
+  pub fn new_info(data: Data, info: SourceInfo) -> Gc<Self> {
+    Gc::new(Self {
+      data: GcCell::new(data),
+      info,
+    })
+  }
+
+  pub fn borrow(&self) -> GcCellRef<Data> {
+    self.data.borrow()
+  }
+
+  pub fn borrow_mut(&self) -> GcCellRefMut<Data> {
+    self.data.borrow_mut()
+  }
+}
 
 #[derive(Clone, Debug, Finalize, Trace)]
 pub enum Data {
-  List(VecDeque<GcData>),
+  List(VecDeque<Gc<DataCell>>),
   Symbol(Rc<str>),
   String(String),
   Boolean(bool),
   // first element is the fn name
-  Builtin(Rc<str>, #[unsafe_ignore_trace] Rc<dyn BuiltinFn>),
-  // procedure name, parameter list, procedure code
-  Procedure(Option<Rc<str>>, Vec<Rc<str>>, GcData),
+  Builtin {
+    name: Rc<str>,
+    parameters: usize,
+    arguments: Vec<Gc<DataCell>>, // for partial application
+    #[unsafe_ignore_trace] 
+    code: Rc<dyn BuiltinFn>,
+  },
+  Procedure {
+    name: Option<Rc<str>>,
+    parameters: Vec<Rc<str>>,
+    arguments: Vec<Gc<DataCell>>, // for partial application
+    code: Gc<DataCell>,
+  },
   // numbers
   Complex(f64, f64),
   Real(f64),
@@ -64,6 +105,7 @@ impl Data {
 impl PartialEq for Data {
   fn eq(&self, other: &Self) -> bool {
     use Data::*;
+
     match (self, other) {
       (List(l), List(r)) => {
         if l.len() != r.len() {
@@ -77,17 +119,16 @@ impl PartialEq for Data {
       (Symbol(l), Symbol(r)) => Rc::ptr_eq(l, r),
       (String(l), String(r)) => l == r,
       (Boolean(l), Boolean(r)) => l == r,
-      (Builtin(_, l), Builtin(_, r)) => Rc::ptr_eq(l, r),
-      (Procedure(_, _, l), Procedure(_, _, r)) => Gc::ptr_eq(l, r),
-      (Complex(lr, li), Complex(rr, ri)) => lr == rr && li == ri,
-      (Real(l), Real(r)) => l == r,
-      (Rational(_, _), Rational(_, _)) => unimplemented!("Rationals are unreduced"),
+      (Builtin { code: l, .. }, Builtin { code: r, .. }) => Rc::ptr_eq(l, r),
+      (Procedure { code: l, .. }, Procedure { code: r, .. }) => Gc::ptr_eq(l, r),
+      (Rational(ln, ld), Rational(rn, rd)) => ln * *rd as i64 == rn * *ld as i64,
       (Integer(l), Integer(r)) => l == r,
+      (Complex(_, _), Complex(_, _)) => unimplemented!(),
+      (Real(_), Real(_)) => unimplemented!(),
       _ => false,
     }
   }
 }
-impl Eq for Data {}
 
 #[derive(Debug, Default)]
 pub struct SymbolTable(HashSet<Rc<str>>);
@@ -113,7 +154,7 @@ impl SymbolTable {
 }
 
 pub struct Env {
-  bindings: RefCell<HashMap<Rc<str>, GcData>>,
+  bindings: RefCell<HashMap<Rc<str>, Gc<DataCell>>>,
   prev_scope: Option<Rc<Env>>,
 }
 
@@ -132,11 +173,11 @@ impl Env {
     }
   }
 
-  pub fn bind(&self, name: &Rc<str>, value: &GcData) {
-    let _ = self.bindings.borrow_mut().insert(Rc::clone(name), Gc::clone(value));
+  pub fn bind(&self, name: &Rc<str>, value: Gc<DataCell>) {
+    let _ = self.bindings.borrow_mut().insert(Rc::clone(name), value);
   }
 
-  pub fn set(&self, name: &Rc<str>, value: &GcData) -> bool {
+  pub fn set(&self, name: &Rc<str>, value: &Gc<DataCell>) -> bool {
     if let Some(old_value) = self.bindings.borrow_mut().get_mut(name) {
       *old_value = Gc::clone(value);
       true
@@ -147,7 +188,7 @@ impl Env {
     }
   }
 
-  pub fn lookup(&self, name: &Rc<str>) -> Option<GcData> {
+  pub fn lookup(&self, name: &Rc<str>) -> Option<Gc<DataCell>> {
     self.bindings.borrow().get(name)
       .map(|data| Gc::clone(data))
       .or(self.prev_scope.as_ref().and_then(|prev| prev.lookup(name)))
@@ -191,7 +232,7 @@ mod tests {
   fn table_get() {
     let mut table = SymbolTable::new();
 
-    assert_eq!(table.get("asdf"), None);
+    assert!(table.get("asdf").is_none());
 
     let asdf = table.add("asdf");
 
@@ -200,7 +241,7 @@ mod tests {
 
   macro_rules! gcdata {
     ($e:expr) => {
-      Gc::new(GcCell::new($e))
+      Gc::new(DataCell::new_info($e, SourceInfo::blank()))
     };
   }
 
@@ -210,9 +251,10 @@ mod tests {
 
     let hello_sym = Rc::from("hello");
     let hello_data = gcdata!(Data::String("Hello".into()));
-    env.bind(&hello_sym, &hello_data);
+    env.bind(&hello_sym, Gc::clone(&hello_data));
 
-    assert_eq!(env.lookup(&hello_sym).unwrap(), hello_data);
+    let hello_lookup = env.lookup(&hello_sym).unwrap();
+    assert_eq!(*hello_lookup.borrow(), *hello_data.borrow());
   }
 
   #[test]
@@ -221,15 +263,17 @@ mod tests {
 
     let hello_sym = Rc::from("hello");
     let hello_data = gcdata!(Data::String("Hello".into()));
-    env.bind(&hello_sym, &hello_data);
+    env.bind(&hello_sym, Gc::clone(&hello_data));
 
     let nested_env = env.new_scope();
 
     let goodbye_data = gcdata!(Data::String("Goodbye".into()));
-    nested_env.bind(&hello_sym, &goodbye_data);
+    nested_env.bind(&hello_sym, Gc::clone(&goodbye_data));
 
-    assert_eq!(env.lookup(&hello_sym).unwrap(), hello_data);
-    assert_eq!(nested_env.lookup(&hello_sym).unwrap(), goodbye_data);
+    let global_lookup = env.lookup(&hello_sym).unwrap();
+    assert_eq!(*global_lookup.borrow(), *hello_data.borrow());
+    let nested_lookup = nested_env.lookup(&hello_sym).unwrap();
+    assert_eq!(*nested_lookup.borrow(), *goodbye_data.borrow());
   }
 }
 

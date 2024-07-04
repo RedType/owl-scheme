@@ -192,7 +192,11 @@ pub fn import_std(vm: &mut VM) {
       };
     } else {
       let mut xs_iter = xs.iter();
-      let dividend = xs_iter.next().unwrap().borrow().clone_numeric()?;
+      let next_arg = xs_iter.next().unwrap();
+      let dividend = match next_arg.borrow().clone_numeric() {
+        Ok(data) => data,
+        Err(e) => { return Err(Box::new(e)); },
+      };
       let res = xs_iter.fold(dividend, |a, x| match (a, &*x.borrow()) {
         (Integer(l), &Integer(r)) => Real(l as f64 / r as f64),
         (Real(l), &Integer(r)) => Real(l / r as f64),

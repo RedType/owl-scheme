@@ -1,17 +1,19 @@
 use crate::{
-  data::{BuiltinFn, Data, Env, GcData, SymbolTable},
-  error::EvalError,
+  data::{BuiltinFn, Data, DataCell, Env, SymbolTable},
+  error::{EvalError, SourceInfo, VMError},
   stdlib,
   util::LRU,
 };
-use gc::{Gc, GcCell};
+use gc::Gc;
 use log::*;
 use prime_factorization::Factorization;
 use std::{
   cell::{RefCell, UnsafeCell},
   collections::HashMap,
   fmt::Write,
+  fs::File,
   hash::{DefaultHasher, Hash, Hasher},
+  io::Read,
   ptr,
   rc::Rc,
 };
@@ -46,11 +48,6 @@ impl VM {
     } else {
       unreachable!();
     }
-  }
-
-  pub fn fetch_builtin<S: AsRef<str>>(&self, name: S) -> Option<Data> {
-    let named_code = self.builtins.get_key_value(name.as_ref());
-    named_code.map(|(name, code)| Data::Builtin(Rc::clone(name), Rc::clone(code)))
   }
 
   // SAFETY: the factors_memo pointer is only used in this function, so
@@ -161,13 +158,16 @@ impl VM {
         }
       },
       Integer(x) => write!(f, "{}", x),
-      Builtin(name, _) => write!(f, "<builtin fn {}>", name),
-      Procedure(name, args, proc) => {
+      Builtin { name, .. } => write!(f, "<builtin fn {}>", name),
+      Procedure { name, parameters, arguments, code } => {
         let mut hasher = DefaultHasher::new();
-        for arg in args {
-          arg.hash(&mut hasher);
+        for param in parameters {
+          param.hash(&mut hasher);
         }
-        ptr::hash(proc, &mut hasher);
+        for arg in arguments {
+          ptr::hash(arg, &mut hasher);
+        }
+        ptr::hash(code, &mut hasher);
         let hash = hasher.finish() % 16u64.pow(6);
         if let Some(name) = name {
           write!(f, "<procedure {} {:x}>", name, hash)
@@ -178,7 +178,7 @@ impl VM {
     }.unwrap();
   }
 
-  pub fn eval(&self, env: &Rc<Env>, expr: GcData) -> Result<GcData, EvalError> {
+  pub fn eval(&mut self, env: &Rc<Env>, expr: Gc<DataCell>) -> Result<Gc<DataCell>, VMError> {
     use Data::*;
 
     match *expr.borrow() {
@@ -189,15 +189,17 @@ impl VM {
       | Real(_)
       | Rational(_, _)
       | Integer(_)
-      | Builtin(_, _)
-      | Procedure(_, _, _) => Ok(Gc::clone(&expr)),
+      | Builtin { .. }
+      | Procedure{ .. } => Ok(Gc::clone(&expr)),
 
       // variable lookup
-      Symbol(ref name) => env.lookup(name).ok_or(EvalError::UnboundSymbol),
+      Symbol(ref name)
+        => env.lookup(name)
+          .ok_or(VMError::new(EvalError::UnboundSymbol, expr.info.clone())),
 
       // function application & special forms
       List(ref exps) => match exps.front().as_ref() {
-        None => Err(EvalError::NonFunctionApplication),
+        None => Err(VMError::new(EvalError::NonFunctionApplication, expr.info.clone())),
         Some(gcdata) => match *gcdata.borrow() {
           ///////////////////
           // special forms //
@@ -213,10 +215,10 @@ impl VM {
               if let Symbol(ref name) = *exps[1].borrow() {
                 Some(Rc::clone(name))
               } else {
-                return Err(EvalError::InvalidLambdaName);
+                return Err(VMError::new(EvalError::InvalidLambdaName, gcdata.info.clone()));
               }
             } else {
-              return Err(EvalError::InvalidSpecialForm);
+              return Err(VMError::new(EvalError::InvalidSpecialForm, gcdata.info.clone()));
             };
 
             // construct parameter list
@@ -227,93 +229,255 @@ impl VM {
                 if let Symbol(ref s) = *p.borrow() {
                   parameters.push(Rc::clone(s));
                 } else {
-                  return Err(EvalError::InvalidParameter);
+                  return Err(VMError::new(EvalError::InvalidParameter, gcdata.info.clone()));
                 }
               }
             } else {
-              return Err(EvalError::InvalidParameterList);
+              return Err(VMError::new(EvalError::InvalidParameterList, gcdata.info.clone()));
             }
 
             // build procedure
-            let proc = Procedure(name, parameters, Gc::clone(&exps[2]));
+            let proc = Procedure {
+              name,
+              parameters,
+              arguments: Vec::new(),
+              code: Gc::clone(&exps[2]),
+            };
 
-            Ok(Gc::new(GcCell::new(proc)))
+            Ok(DataCell::new_info(proc, gcdata.info.clone()))
           },
 
           Symbol(ref s) if *s == "quote".into() => {
             if exps.len() != 2 {
-              Err(EvalError::InvalidSpecialForm)
+              Err(VMError::new(EvalError::InvalidSpecialForm, gcdata.info.clone()))
             } else {
               Ok(Gc::clone(&exps[1]))
             }
           },
 
-          Symbol(ref s) if *s == "let".into() => {
-            todo!();
-          },
-
-          Symbol(ref s) if *s == "let*".into() => {
-            todo!();
-          },
-
-          Symbol(ref s) if *s == "letrec".into() => {
-            todo!();
-          },
-
           Symbol(ref s) if *s == "define".into() => {
-            todo!();
+            if exps.len() != 3 {
+              Err(VMError::new(EvalError::InvalidSpecialForm, gcdata.info.clone()))
+            } else if let Symbol(ref s) = &*exps[1].borrow() {
+              env.bind(s, self.eval(env, Gc::clone(&exps[2]))?);
+              Ok(DataCell::new_info(Data::nil(), gcdata.info.clone()))
+            } else {
+              Err(VMError::new(EvalError::InvalidSpecialForm, gcdata.info.clone()))
+            }
           },
 
           Symbol(ref s) if *s == "set!".into() => {
             if exps.len() != 2 {
-              Err(EvalError::InvalidSpecialForm)
+              Err(VMError::new(EvalError::InvalidSpecialForm, gcdata.info.clone()))
             } else {
-              let res = env.set(s, &exps[1]);
-              Ok(Gc::new(GcCell::new(Boolean(res))))
+              if env.set(s, &exps[1]) {
+                Ok(DataCell::new_info(Data::nil(), gcdata.info.clone()))
+              } else {
+                Err(VMError::new(EvalError::UnboundSymbol, gcdata.info.clone()))
+              }
             }
           },
 
           Symbol(ref s) if *s == "if".into() => {
-            todo!();
+            if exps.len() != 4 {
+              Err(VMError::new(EvalError::InvalidSpecialForm, gcdata.info.clone()))
+            } else {
+              // evaluate condition
+              match &*self.eval(env, Gc::clone(&exps[1]))?.borrow() {
+                Boolean(true) => self.eval(env, Gc::clone(&exps[2])),
+                Boolean(false) => self.eval(env, Gc::clone(&exps[3])),
+                _ => Err(VMError::new(EvalError::NonBooleanTest, gcdata.info.clone())),
+              }
+            }
           },
 
-          Symbol(ref s) if *s == "cond".into() => {
-            todo!();
-          },
+          Symbol(ref s) if *s == "include".into() => {
+            if exps.len() != 2 {
+              Err(VMError::new(EvalError::InvalidSpecialForm, gcdata.info.clone()))
+            } else {
+              if let String(s) = &*exps[1].borrow() {
+                // read file
+                let mut source = std::string::String::new();
+                match File::open(s) {
+                  Ok(mut f) => match f.read_to_string(&mut source) {
+                    Ok(_) => Ok(()),
+                    Err(e) => Err(VMError::new(EvalError::IOError(e), gcdata.info.clone())),
+                  },
+                  Err(e) => Err(VMError::new(EvalError::IOError(e), gcdata.info.clone())),
+                }?;
 
-          Symbol(ref s) if *s == "case".into() => {
-            todo!();
-          },
+                // lex and parse file
+                let lexemes = self.lex(source.chars())?;
+                let codes = self.build_ast(lexemes)?;
 
-          Symbol(ref s) if *s == "and".into() => {
-            todo!();
-          },
+                let mut evaluated = DataCell::new_info(Data::nil(), gcdata.info.clone());
+                for code in codes {
+                  evaluated = self.eval(env, code)?;
+                }
 
-          Symbol(ref s) if *s == "or".into() => {
-            todo!();
-          },
-
-          Symbol(ref s) if *s == "begin".into() => {
-            todo!();
-          },
-
-          Symbol(ref s) if *s == "do".into() => {
-            todo!();
+                Ok(evaluated)
+              } else {
+                Err(VMError::new(EvalError::InvalidSpecialForm, gcdata.info.clone()))
+              }
+            }
           },
 
           // procedure call
-          Procedure(ref _name, _, _) => {
-            todo!();
+          Procedure { ref name, ref parameters, ref arguments, ref code } => {
+            let given_args_len = exps.len() - 1;
+            self.apply(
+              env,
+              name,
+              gcdata.info.clone(),
+              parameters,
+              arguments,
+              exps.iter().skip(1).cloned(),
+              given_args_len,
+              code,
+            )
           },
 
-          _ => Err(EvalError::NonFunctionApplication),
+          // builtin call
+          Builtin {
+            ref name,
+            parameters,
+            ref arguments,
+            ref code,
+          } => {
+            let given_args_len = exps.len() - 1;
+
+            self.apply_builtin(
+              name,
+              gcdata.info.clone(),
+              parameters,
+              arguments,
+              exps.iter().skip(1).cloned(),
+              given_args_len,
+              code,
+            )
+          },
+
+          _ => Err(VMError::new(EvalError::NonFunctionApplication, gcdata.info.clone())),
         },
       },
     }
   }
 
-  pub fn apply(&self, f: Data, args: Data) -> Data {
-    Data::nil()
+  pub fn apply<I: IntoIterator<Item = Gc<DataCell>>>(
+    &mut self,
+    env: &Rc<Env>,
+    name: &Option<Rc<str>>,
+    info: SourceInfo,
+    parameters: &[Rc<str>],
+    preapplied_arguments: &[Gc<DataCell>],
+    given_arguments: I,
+    given_arguments_count: usize,
+    code: &Gc<DataCell>,
+  ) -> Result<Gc<DataCell>, VMError> {
+    use Data::*;
+
+    // check for partial application
+    let remaining = parameters.len()
+      - preapplied_arguments.len()
+      - given_arguments_count;
+
+    if remaining > 0 {
+    // this is a partial application
+      let new_proc_name = name.as_ref().map(|name| {
+        let mut new_proc_name = name.to_string();
+        write!(new_proc_name, "_p{}", remaining).unwrap();
+        Rc::from(new_proc_name)
+      });
+
+      let full_arguments = preapplied_arguments
+        .iter()
+        .cloned()
+        .chain(given_arguments.into_iter())
+        .collect::<_>();
+
+      let new_partial = Procedure {
+        name: new_proc_name,
+        parameters: parameters.iter().cloned().collect::<_>(),
+        arguments: full_arguments,
+        code: Gc::clone(&code),
+      };
+
+      Ok(DataCell::new_info(new_partial, info))
+
+    } else if remaining == 0 {
+    // this is a full application
+      let new_env = Rc::new(env.new_scope());
+
+      // apply arguments
+      let full_arguments = preapplied_arguments.iter().cloned()
+        .chain(given_arguments.into_iter());
+      let binds = parameters.iter().zip(full_arguments);
+      for (p, a) in binds {
+        new_env.bind(p, a);
+      }
+
+      // evaluate and return
+      self.eval(&new_env, Gc::clone(&code))
+
+    } else {
+    // too many arguments applied
+      Err(VMError::new(EvalError::TooManyArguments, info))
+    }
+  }
+
+  pub fn apply_builtin<I: IntoIterator<Item = Gc<DataCell>>>(
+    &mut self,
+    name: &Rc<str>,
+    info: SourceInfo,
+    parameters: usize,
+    preapplied_arguments: &[Gc<DataCell>],
+    given_arguments: I,
+    given_arguments_count: usize,
+    code: &Rc<dyn BuiltinFn>,
+  ) -> Result<Gc<DataCell>, VMError> {
+    use Data::*;
+
+    // check for partial application
+    let remaining = parameters
+      - preapplied_arguments.len()
+      - given_arguments_count;
+
+    if remaining > 0 {
+    // this is a partial application
+      let mut new_proc_name_buffer = name.to_string();
+      write!(new_proc_name_buffer, "_p{}", remaining).unwrap();
+      let new_proc_name = Rc::from(new_proc_name_buffer);
+
+      let full_arguments = preapplied_arguments
+        .iter()
+        .cloned()
+        .chain(given_arguments.into_iter())
+        .collect::<_>();
+
+      let new_partial = Builtin {
+        name: new_proc_name,
+        parameters: remaining,
+        arguments: full_arguments,
+        code: Rc::clone(&code),
+      };
+
+      Ok(DataCell::new_info(new_partial, info))
+
+    } else if remaining == 0 {
+    // this is a full application
+      let full_arguments = preapplied_arguments.iter().cloned()
+        .chain(given_arguments.into_iter())
+        .collect::<Vec<_>>();
+
+      // evaluate and return
+      code(&full_arguments)
+        .map(|data| DataCell::new_info(data, info.clone()))
+        .map_err(|err| VMError(err, info.clone()))
+
+    } else {
+    // too many arguments applied
+      Err(VMError(Box::new(EvalError::TooManyArguments), info))
+    }
   }
 }
 
@@ -327,10 +491,10 @@ impl Default for VM {
 
 #[cfg(test)]
 mod tests {
-  use gc::{Gc, GcCell};
   use std::collections::VecDeque;
   use crate::{
-    data::Data,
+    data::{Data, DataCell},
+    error::SourceInfo,
     vm::VM,
   };
 
@@ -363,8 +527,7 @@ mod tests {
     let list = List(
       [symbol, string, tru, fals, int, float, nil]
         .into_iter()
-        .map(GcCell::new)
-        .map(Gc::new)
+        .map(|e| DataCell::new_info(e, SourceInfo::blank()))
         .collect::<VecDeque<_>>()
     );
     assert_eq!(vm.display_data(&list), "(jeremy \"upright bass\" #true #false 35 123.4)");
@@ -372,8 +535,7 @@ mod tests {
     let dotted = List(
       [Real(12.0), String("oy".into()), Data::nil(), Real(0.23456)]
         .into_iter()
-        .map(GcCell::new)
-        .map(Gc::new)
+        .map(|e| DataCell::new_info(e, SourceInfo::blank()))
         .collect::<VecDeque<_>>()
     );
     assert_eq!(vm.display_data(&dotted), "(12 \"oy\" () . 0.23456)");
