@@ -38,11 +38,11 @@ fn parse_list<I: Iterator<Item = LexItem>>(
     match lexemes.peek() {
       None => {
         return Err(VMError(Box::new(ParseError::MismatchedLParen), head_info));
-      }
+      },
       Some(LexItem(Lexeme::Dot, _)) => {
         dotted = true;
         lexemes.next();
-      }
+      },
       Some(LexItem(Lexeme::RParen, _)) => {
         /* no longer ending lists with nil--assume its presence.
          * this means that the dot lexeme is now meaningless,
@@ -55,7 +55,7 @@ fn parse_list<I: Iterator<Item = LexItem>>(
         */
         lexemes.next();
         return Ok(DataCell::new_info(Data::List(list), head_info));
-      }
+      },
       _ => {
         let next_data = parse_rec(lexemes, symbols)?;
 
@@ -72,7 +72,7 @@ fn parse_list<I: Iterator<Item = LexItem>>(
         }
 
         list.push_back(next_data);
-      }
+      },
     }
   }
 }
@@ -84,25 +84,25 @@ fn parse_rec<I: Iterator<Item = LexItem>>(
   let data = match lexemes.next() {
     Some(LexItem(Lexeme::Dot, info)) => {
       panic!("Illegal dot location {:?}", info)
-    }
+    },
     Some(LexItem(Lexeme::Symbol(x), info)) => DataCell::new_info(x, info),
     Some(LexItem(Lexeme::Boolean(x), info)) => {
       DataCell::new_info(Data::Boolean(x), info)
-    }
+    },
     Some(LexItem(Lexeme::String(x), info)) => {
       DataCell::new_info(Data::String(x), info)
-    }
+    },
     Some(LexItem(Lexeme::Integer(x), info)) => {
       DataCell::new_info(Data::Integer(x), info)
-    }
+    },
     Some(LexItem(Lexeme::Float(x), info)) => {
       DataCell::new_info(Data::Real(x), info)
-    }
+    },
 
     Some(LexItem(Lexeme::LParen, info)) => parse_list(lexemes, symbols, info)?,
     Some(LexItem(Lexeme::RParen, info)) => {
       return Err(VMError(Box::new(ParseError::MismatchedRParen), info));
-    }
+    },
     Some(LexItem(Lexeme::Quote, info)) => {
       if let Some(LexItem(Lexeme::RParen, info)) = lexemes.peek() {
         return Err(VMError(Box::new(ParseError::QuotedRParen), info.clone()));
@@ -119,7 +119,7 @@ fn parse_rec<I: Iterator<Item = LexItem>>(
         ),
         info,
       )
-    }
+    },
 
     None => panic!("Tried to parse nothing"),
   };

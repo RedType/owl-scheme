@@ -145,7 +145,7 @@ impl VM {
           }
         }
         write!(f, ")")
-      }
+      },
       Symbol(name) => write!(f, "{}", name),
       String(x) => write!(f, "\"{}\"", x),
       Boolean(x) => write!(f, "{}", if *x { "#true" } else { "#false" }),
@@ -157,7 +157,7 @@ impl VM {
         } else {
           write!(f, "{}{:+}i", *r, *i)
         }
-      }
+      },
       Real(x) => write!(f, "{}", x),
       Rational(n, d) => {
         // reduce
@@ -171,7 +171,7 @@ impl VM {
         } else {
           write!(f, "{}/{}", rn, rd)
         }
-      }
+      },
       Integer(x) => write!(f, "{}", x),
       Builtin { name, .. } => write!(f, "<builtin fn {}>", name),
       Procedure {
@@ -194,7 +194,7 @@ impl VM {
         } else {
           write!(f, "<procedure {:x}>", hash)
         }
-      }
+      },
     }
     .unwrap();
   }
@@ -284,7 +284,7 @@ impl VM {
             };
 
             Ok(DataCell::new_info(proc, gcdata.info.clone()))
-          }
+          },
 
           Symbol(ref s) if *s == "quote".into() => {
             if exps.len() != 2 {
@@ -295,7 +295,7 @@ impl VM {
             } else {
               Ok(Gc::clone(&exps[1]))
             }
-          }
+          },
 
           Symbol(ref s) if *s == "define".into() => {
             if exps.len() != 3 {
@@ -312,7 +312,7 @@ impl VM {
                 gcdata.info.clone(),
               ))
             }
-          }
+          },
 
           Symbol(ref s) if *s == "set!".into() => {
             if exps.len() != 2 {
@@ -327,7 +327,7 @@ impl VM {
                 Err(VMError::new(EvalError::UnboundSymbol, gcdata.info.clone()))
               }
             }
-          }
+          },
 
           Symbol(ref s) if *s == "if".into() => {
             if exps.len() != 4 {
@@ -346,7 +346,7 @@ impl VM {
                 )),
               }
             }
-          }
+          },
 
           Symbol(ref s) if *s == "include".into() => {
             if exps.len() != 2 {
@@ -390,7 +390,7 @@ impl VM {
                 ))
               }
             }
-          }
+          },
 
           // procedure call
           Procedure {
@@ -410,7 +410,7 @@ impl VM {
               given_args_len,
               code,
             )
-          }
+          },
 
           // builtin call
           Builtin {
@@ -430,7 +430,7 @@ impl VM {
               given_args_len,
               code,
             )
-          }
+          },
 
           _ => Err(VMError::new(
             EvalError::NonFunctionApplication,

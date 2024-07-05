@@ -97,13 +97,13 @@ impl VM {
           line += 1;
           col = 0;
           boundary_col = 0;
-        }
+        },
         c @ '(' | c @ ')' | c if c.is_whitespace() => {
           col += 1;
           prev_boundary_col = boundary_col;
           boundary_col = col;
-        }
-        c if c.is_control() => {}
+        },
+        c if c.is_control() => {},
         _ => col += 1,
       }
 
@@ -167,22 +167,22 @@ impl VM {
             '.' => {
               scratch_pad.push('.');
               state = State::FloatOrDotIdent;
-            }
-            c if c.is_whitespace() => {}
+            },
+            c if c.is_whitespace() => {},
             c if c.is_digit(10) => {
               state = State::Decimal;
               scratch_pad.push(c);
-            }
+            },
             c if c.is_control() => return err!(LexError::IllegalCharacter(c)),
             c => {
               state = State::BoolOrIdent;
               scratch_pad.push(c);
-            }
+            },
           }
 
           // everything in this state consumes ch
           shift!();
-        }
+        },
 
         State::Comment => {
           if ch == '\n' {
@@ -190,7 +190,7 @@ impl VM {
           }
 
           shift!();
-        }
+        },
 
         State::BoolOrIdent => {
           if ch.is_alphanumeric() {
@@ -206,45 +206,45 @@ impl VM {
             state = State::Start;
             unshift!();
           }
-        }
+        },
 
         State::String => {
           match ch {
             '\\' => {
               //TODO do escapes
               todo!();
-            }
+            },
             '"' => {
               push_lex!(Lexeme::String(scratch_pad));
               scratch_pad = String::new();
               state = State::Start;
-            }
+            },
             c => scratch_pad.push(c),
           }
 
           shift!();
-        }
+        },
 
         State::NegativeOrIdent => {
           match ch {
             '0' => {
               negative = true;
               state = State::ZeroPrefixNumeric;
-            }
+            },
             c if c.is_numeric() => {
               negative = true;
               scratch_pad.push(c);
               state = State::Decimal;
-            }
+            },
             _ => {
               negative = false;
               scratch_pad.push('-');
               state = State::BoolOrIdent;
-            }
+            },
           }
 
           shift!();
-        }
+        },
 
         State::ZeroPrefixNumeric => {
           match ch {
@@ -253,11 +253,11 @@ impl VM {
             '.' => {
               scratch_pad.push_str("0.");
               state = State::Decimal;
-            }
+            },
             c if c.is_numeric() => {
               scratch_pad.push(c);
               state = State::Decimal;
-            }
+            },
             c if c.is_alphabetic() => return err!(LexError::InvalidNumber),
             _ => {
               negative = false;
@@ -265,11 +265,11 @@ impl VM {
               state = State::Start;
               unshift!();
               continue; // so we don't shift later
-            }
+            },
           }
 
           shift!();
-        }
+        },
 
         State::FloatOrDotIdent => {
           state = match ch {
@@ -277,19 +277,19 @@ impl VM {
               scratch_pad = String::new();
               push_lex!(Lexeme::Dot);
               State::Start
-            }
+            },
             ch if ch.is_numeric() => {
               scratch_pad.push(ch);
               State::Decimal
-            }
+            },
             ch => {
               scratch_pad.push(ch);
               State::BoolOrIdent
-            }
+            },
           };
 
           shift!();
-        }
+        },
 
         State::Hexadecimal => {
           match ch {
@@ -308,13 +308,13 @@ impl VM {
               state = State::Start;
               unshift!();
               continue;
-            }
+            },
             c if c.is_digit(16) => scratch_pad.push(ch),
             _ => return err!(LexError::NonHexCharInHex),
           }
 
           shift!();
-        }
+        },
 
         State::Binary => {
           match ch {
@@ -333,13 +333,13 @@ impl VM {
               state = State::Start;
               unshift!();
               continue;
-            }
+            },
             c if c.is_digit(2) => scratch_pad.push(ch),
             _ => return err!(LexError::NonBinCharInBin),
           }
 
           shift!();
-        }
+        },
 
         State::Decimal => {
           let mut do_conversion = false;
@@ -378,7 +378,7 @@ impl VM {
           } else {
             shift!();
           }
-        }
+        },
       }
     }
 
