@@ -120,18 +120,24 @@ pub fn import_std(vm: &mut VM) {
         Rational(i * d as i64 + n, d)
       }
       (Integer(i), &Real(r)) | (Real(r), &Integer(i)) => Real(r + i as f64),
-      (Integer(n), &Complex(r, i)) | (Complex(r, i), &Integer(n)) => Complex(r + n as f64, i),
+      (Integer(n), &Complex(r, i)) | (Complex(r, i), &Integer(n)) => {
+        Complex(r + n as f64, i)
+      }
       (Rational(ln, ld), &Rational(rn, rd)) => {
         let n = ln * rd as i64 + rn * ld as i64;
         let d = ld * rd;
         Rational(n, d)
       }
-      (Rational(n, d), &Real(r)) | (Real(r), &Rational(n, d)) => Real((n as f64 / d as f64) + r),
+      (Rational(n, d), &Real(r)) | (Real(r), &Rational(n, d)) => {
+        Real((n as f64 / d as f64) + r)
+      }
       (Rational(n, d), &Complex(r, i)) | (Complex(r, i), &Rational(n, d)) => {
         Complex(n as f64 / d as f64 + r, i)
       }
       (Real(l), &Real(r)) => Real(l + r),
-      (Real(n), &Complex(r, i)) | (Complex(r, i), &Real(n)) => Complex(n + r, i),
+      (Real(n), &Complex(r, i)) | (Complex(r, i), &Real(n)) => {
+        Complex(n + r, i)
+      }
       (Complex(lr, li), &Complex(rr, ri)) => Complex(lr + rr, li + ri),
 
       _ => Data::nil(),
@@ -146,20 +152,28 @@ pub fn import_std(vm: &mut VM) {
   vm.def_builtin("*", |xs| {
     let res = xs.iter().fold(Integer(1), |a, x| match (a, &*x.borrow()) {
       (Integer(l), &Integer(r)) => Integer(l * r),
-      (Integer(i), &Rational(n, d)) | (Rational(n, d), &Integer(i)) => Rational(i * n, d),
+      (Integer(i), &Rational(n, d)) | (Rational(n, d), &Integer(i)) => {
+        Rational(i * n, d)
+      }
       (Integer(i), &Real(r)) | (Real(r), &Integer(i)) => Real(r * i as f64),
       (Integer(n), &Complex(r, i)) | (Complex(r, i), &Integer(n)) => {
         Complex(r * n as f64, i * n as f64)
       }
       (Rational(ln, ld), &Rational(rn, rd)) => Rational(ln * rn, ld * rd),
-      (Rational(n, d), &Real(r)) | (Real(r), &Rational(n, d)) => Real((n as f64 / d as f64) * r),
+      (Rational(n, d), &Real(r)) | (Real(r), &Rational(n, d)) => {
+        Real((n as f64 / d as f64) * r)
+      }
       (Rational(n, d), &Complex(r, i)) | (Complex(r, i), &Rational(n, d)) => {
         let rat = n as f64 / d as f64;
         Complex(rat * r, rat * i)
       }
       (Real(l), &Real(r)) => Real(l * r),
-      (Real(n), &Complex(r, i)) | (Complex(r, i), &Real(n)) => Complex(n * r, n * i),
-      (Complex(lr, li), &Complex(rr, ri)) => Complex(lr * rr - li * ri, lr * ri + li * rr),
+      (Real(n), &Complex(r, i)) | (Complex(r, i), &Real(n)) => {
+        Complex(n * r, n * i)
+      }
+      (Complex(lr, li), &Complex(rr, ri)) => {
+        Complex(lr * rr - li * ri, lr * ri + li * rr)
+      }
 
       _ => Data::nil(),
     });

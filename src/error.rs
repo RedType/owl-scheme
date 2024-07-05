@@ -58,11 +58,17 @@ impl fmt::Display for LexError {
     use LexError::*;
 
     match *self {
-      DotInNonDecimalNumeric => write!(f, "\".\" cannot appear in a non-decimal number"),
+      DotInNonDecimalNumeric => {
+        write!(f, "\".\" cannot appear in a non-decimal number")
+      }
       IllegalCharacter(c) => write!(f, "\"{}\" is not allowed in source", c),
       InvalidNumber => write!(f, "invalid number"),
-      NonBinCharInBin => write!(f, "non-binary (0-1) character in binary number"),
-      NonDecCharInDec => write!(f, "non-decimal (0-9) character in decimal number"),
+      NonBinCharInBin => {
+        write!(f, "non-binary (0-1) character in binary number")
+      }
+      NonDecCharInDec => {
+        write!(f, "non-decimal (0-9) character in decimal number")
+      }
       NonHexCharInHex => write!(
         f,
         "non-hexadecimal (0-9 + a-f) character in hexadecimal number"
@@ -86,8 +92,12 @@ impl fmt::Display for ParseError {
     match *self {
       MismatchedLParen => write!(f, "mismatched \"(\" left parenthesis"),
       MismatchedRParen => write!(f, "mismatched \")\" right parenthesis"),
-      QuotedRParen => write!(f, "quoted \")\" right parentheses are not allowed"),
-      WronglyDottedList => write!(f, "dot must occur before last element of list"),
+      QuotedRParen => {
+        write!(f, "quoted \")\" right parentheses are not allowed")
+      }
+      WronglyDottedList => {
+        write!(f, "dot must occur before last element of list")
+      }
     }
   }
 }
@@ -102,7 +112,9 @@ impl fmt::Display for ArithmeticError {
     use ArithmeticError::*;
 
     match *self {
-      NonNumericArgument => write!(f, "non-numeric data given where a number was expected"),
+      NonNumericArgument => {
+        write!(f, "non-numeric data given where a number was expected")
+      }
     }
   }
 }
@@ -126,16 +138,26 @@ impl fmt::Display for EvalError {
     use EvalError::*;
 
     match *self {
-      InvalidSpecialForm => write!(f, "incorrect number of arguments given for special form"),
+      InvalidSpecialForm => {
+        write!(f, "incorrect number of arguments given for special form")
+      }
       InvalidLambdaName => write!(f, "lambda name must be a symbol"),
       InvalidParameter => write!(f, "parameters must be symbols"),
-      InvalidParameterList => write!(f, "expression must be a formal parameter list"),
-      InvalidArgumentList => write!(f, "expression must be a list of arguments"),
+      InvalidParameterList => {
+        write!(f, "expression must be a formal parameter list")
+      }
+      InvalidArgumentList => {
+        write!(f, "expression must be a list of arguments")
+      }
       IOError(ref e) => write!(f, "{}", e),
       NonBooleanTest => write!(f, "non-boolean expression in conditional"),
-      NonFunctionApplication => write!(f, "non-function values cannot be applied"),
+      NonFunctionApplication => {
+        write!(f, "non-function values cannot be applied")
+      }
       TooManyArguments => write!(f, "too many arguments given"),
-      UnboundSymbol => write!(f, "attempted to evaluate or set an unbound symbol"),
+      UnboundSymbol => {
+        write!(f, "attempted to evaluate or set an unbound symbol")
+      }
     }
   }
 }

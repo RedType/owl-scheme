@@ -8,7 +8,10 @@ use gc::Gc;
 use std::{collections::VecDeque, iter::Peekable};
 
 impl VM {
-  pub fn build_ast<I>(&mut self, sequence: I) -> Result<Vec<Gc<DataCell>>, VMError>
+  pub fn build_ast<I>(
+    &mut self,
+    sequence: I,
+  ) -> Result<Vec<Gc<DataCell>>, VMError>
   where
     I: IntoIterator<Item = LexItem>,
   {
@@ -79,12 +82,22 @@ fn parse_rec<I: Iterator<Item = LexItem>>(
   symbols: &mut SymbolTable,
 ) -> Result<Gc<DataCell>, VMError> {
   let data = match lexemes.next() {
-    Some(LexItem(Lexeme::Dot, info)) => panic!("Illegal dot location {:?}", info),
+    Some(LexItem(Lexeme::Dot, info)) => {
+      panic!("Illegal dot location {:?}", info)
+    }
     Some(LexItem(Lexeme::Symbol(x), info)) => DataCell::new_info(x, info),
-    Some(LexItem(Lexeme::Boolean(x), info)) => DataCell::new_info(Data::Boolean(x), info),
-    Some(LexItem(Lexeme::String(x), info)) => DataCell::new_info(Data::String(x), info),
-    Some(LexItem(Lexeme::Integer(x), info)) => DataCell::new_info(Data::Integer(x), info),
-    Some(LexItem(Lexeme::Float(x), info)) => DataCell::new_info(Data::Real(x), info),
+    Some(LexItem(Lexeme::Boolean(x), info)) => {
+      DataCell::new_info(Data::Boolean(x), info)
+    }
+    Some(LexItem(Lexeme::String(x), info)) => {
+      DataCell::new_info(Data::String(x), info)
+    }
+    Some(LexItem(Lexeme::Integer(x), info)) => {
+      DataCell::new_info(Data::Integer(x), info)
+    }
+    Some(LexItem(Lexeme::Float(x), info)) => {
+      DataCell::new_info(Data::Real(x), info)
+    }
 
     Some(LexItem(Lexeme::LParen, info)) => parse_list(lexemes, symbols, info)?,
     Some(LexItem(Lexeme::RParen, info)) => {

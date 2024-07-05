@@ -9,7 +9,10 @@ use std::{
 };
 
 // trait alias
-pub trait BuiltinFn: Fn(&[Gc<DataCell>]) -> Result<Data, Box<dyn Error>> {}
+pub trait BuiltinFn:
+  Fn(&[Gc<DataCell>]) -> Result<Data, Box<dyn Error>>
+{
+}
 impl<T: Fn(&[Gc<DataCell>]) -> Result<Data, Box<dyn Error>>> BuiltinFn for T {}
 
 impl fmt::Debug for dyn BuiltinFn {
@@ -111,8 +114,12 @@ impl PartialEq for Data {
       (String(l), String(r)) => l == r,
       (Boolean(l), Boolean(r)) => l == r,
       (Builtin { code: l, .. }, Builtin { code: r, .. }) => Rc::ptr_eq(l, r),
-      (Procedure { code: l, .. }, Procedure { code: r, .. }) => Gc::ptr_eq(l, r),
-      (Rational(ln, ld), Rational(rn, rd)) => ln * *rd as i64 == rn * *ld as i64,
+      (Procedure { code: l, .. }, Procedure { code: r, .. }) => {
+        Gc::ptr_eq(l, r)
+      }
+      (Rational(ln, ld), Rational(rn, rd)) => {
+        ln * *rd as i64 == rn * *ld as i64
+      }
       (Integer(l), Integer(r)) => l == r,
       (Complex(_, _), Complex(_, _)) => unimplemented!(),
       (Real(_), Real(_)) => unimplemented!(),

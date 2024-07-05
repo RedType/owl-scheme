@@ -38,7 +38,11 @@ impl VM {
     }
   }
 
-  pub fn def_builtin<F: BuiltinFn + 'static, S: AsRef<str>>(&mut self, name: S, code: F) {
+  pub fn def_builtin<F: BuiltinFn + 'static, S: AsRef<str>>(
+    &mut self,
+    name: S,
+    code: F,
+  ) {
     let sym = self.symbols.add(name);
     if let Data::Symbol(ref name) = sym {
       let replaced = self.builtins.insert(Rc::clone(name), Rc::new(code));
@@ -195,7 +199,11 @@ impl VM {
     .unwrap();
   }
 
-  pub fn eval(&mut self, env: &Rc<Env>, expr: Gc<DataCell>) -> Result<Gc<DataCell>, VMError> {
+  pub fn eval(
+    &mut self,
+    env: &Rc<Env>,
+    expr: Gc<DataCell>,
+  ) -> Result<Gc<DataCell>, VMError> {
     use Data::*;
 
     match *expr.borrow() {
@@ -332,7 +340,10 @@ impl VM {
               match &*self.eval(env, Gc::clone(&exps[1]))?.borrow() {
                 Boolean(true) => self.eval(env, Gc::clone(&exps[2])),
                 Boolean(false) => self.eval(env, Gc::clone(&exps[3])),
-                _ => Err(VMError::new(EvalError::NonBooleanTest, gcdata.info.clone())),
+                _ => Err(VMError::new(
+                  EvalError::NonBooleanTest,
+                  gcdata.info.clone(),
+                )),
               }
             }
           }
@@ -350,16 +361,23 @@ impl VM {
                 match File::open(s) {
                   Ok(mut f) => match f.read_to_string(&mut source) {
                     Ok(_) => Ok(()),
-                    Err(e) => Err(VMError::new(EvalError::IOError(e), gcdata.info.clone())),
+                    Err(e) => Err(VMError::new(
+                      EvalError::IOError(e),
+                      gcdata.info.clone(),
+                    )),
                   },
-                  Err(e) => Err(VMError::new(EvalError::IOError(e), gcdata.info.clone())),
+                  Err(e) => Err(VMError::new(
+                    EvalError::IOError(e),
+                    gcdata.info.clone(),
+                  )),
                 }?;
 
                 // lex and parse file
                 let lexemes = self.lex(source.chars())?;
                 let codes = self.build_ast(lexemes)?;
 
-                let mut evaluated = DataCell::new_info(Data::nil(), gcdata.info.clone());
+                let mut evaluated =
+                  DataCell::new_info(Data::nil(), gcdata.info.clone());
                 for code in codes {
                   evaluated = self.eval(env, code)?;
                 }
@@ -437,7 +455,8 @@ impl VM {
     use Data::*;
 
     // check for partial application
-    let remaining = parameters.len() - preapplied_arguments.len() - given_arguments_count;
+    let remaining =
+      parameters.len() - preapplied_arguments.len() - given_arguments_count;
 
     if remaining > 0 {
       // this is a partial application
@@ -496,7 +515,8 @@ impl VM {
     use Data::*;
 
     // check for partial application
-    let remaining = parameters - preapplied_arguments.len() - given_arguments_count;
+    let remaining =
+      parameters - preapplied_arguments.len() - given_arguments_count;
 
     if remaining > 0 {
       // this is a partial application

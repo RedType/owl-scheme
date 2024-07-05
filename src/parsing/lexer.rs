@@ -489,16 +489,19 @@ mod tests {
     assert_eq!(expected_pound, actual_pound);
 
     let actual_dot_prefix = lex_str!(vm, ".e");
-    let expected_dot_prefix = vec![Lexeme::Symbol(vm.symbols.get(".e").unwrap())];
+    let expected_dot_prefix =
+      vec![Lexeme::Symbol(vm.symbols.get(".e").unwrap())];
     assert_eq!(expected_dot_prefix, actual_dot_prefix);
 
     let actual_sym_with_number = lex_str!(vm, ":3");
-    let expected_sym_with_number = vec![Lexeme::Symbol(vm.symbols.get(":3").unwrap())];
+    let expected_sym_with_number =
+      vec![Lexeme::Symbol(vm.symbols.get(":3").unwrap())];
     assert_eq!(expected_sym_with_number, actual_sym_with_number);
 
     // should these produce an error?
     let actual_fake_true = lex_str!(vm, "#tr");
-    let expected_fake_true = vec![Lexeme::Symbol(vm.symbols.get("#tr").unwrap())];
+    let expected_fake_true =
+      vec![Lexeme::Symbol(vm.symbols.get("#tr").unwrap())];
     assert_eq!(expected_fake_true, actual_fake_true);
   }
 
@@ -664,19 +667,23 @@ mod tests {
     ];
     assert_eq!(expected_sym, actual_sym);
 
-    let expected_bool = vec![Lexeme::LParen, Lexeme::Boolean(true), Lexeme::RParen];
+    let expected_bool =
+      vec![Lexeme::LParen, Lexeme::Boolean(true), Lexeme::RParen];
     let actual_bool = lex_str!(vm, "(#t)");
     assert_eq!(expected_bool, actual_bool);
 
-    let expected_str = vec![Lexeme::LParen, Lexeme::String("owo".into()), Lexeme::RParen];
+    let expected_str =
+      vec![Lexeme::LParen, Lexeme::String("owo".into()), Lexeme::RParen];
     let actual_str = lex_str!(vm, "(\"owo\")");
     assert_eq!(expected_str, actual_str);
 
-    let expected_int = vec![Lexeme::LParen, Lexeme::Integer(300), Lexeme::RParen];
+    let expected_int =
+      vec![Lexeme::LParen, Lexeme::Integer(300), Lexeme::RParen];
     let actual_int = lex_str!(vm, "(300)");
     assert_eq!(expected_int, actual_int);
 
-    let expected_float = vec![Lexeme::LParen, Lexeme::Float(0.15), Lexeme::RParen];
+    let expected_float =
+      vec![Lexeme::LParen, Lexeme::Float(0.15), Lexeme::RParen];
     let actual_float = lex_str!(vm, "(.15)");
     assert_eq!(expected_float, actual_float);
   }
