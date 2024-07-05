@@ -79,9 +79,7 @@ impl<T: Debug + Hash> LRU<T> {
 
   pub fn dequeue(&mut self) -> Option<T> {
     // get tail node
-    let node = if let Some(tail) = self.tail {
-      tail
-    } else {
+    let Some(node) = self.tail else {
       return None;
     };
 
