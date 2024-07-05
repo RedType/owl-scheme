@@ -39,7 +39,7 @@ impl SourceInfo {
 
 impl fmt::Display for SourceInfo {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    write!(f, "on line {}:", self.line)
+    write!(f, "on line {}:", self.line + 1)
   }
 }
 
