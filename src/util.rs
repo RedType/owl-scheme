@@ -79,9 +79,7 @@ impl<T: Debug + Hash> LRU<T> {
 
   pub fn dequeue(&mut self) -> Option<T> {
     // get tail node
-    let Some(node) = self.tail else {
-      return None;
-    };
+    let node = self.tail?;
 
     // unlink tail node
     unsafe {
