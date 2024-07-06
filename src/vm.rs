@@ -134,7 +134,8 @@ impl VM {
 
     match d {
       List(xs) => {
-        let mut iter = xs.iter().peekable();
+        let borrow = xs.borrow();
+        let mut iter = borrow.iter().peekable();
         let mut first = true;
 
         write!(f, "(").unwrap();
@@ -151,16 +152,19 @@ impl VM {
           // if so, print a dot for non-nil and print nothing for nil
           // otherwise just print the element
           if !last {
-            self.display_data_rec(f, &x.borrow());
-          } else if !x.borrow().is_nil() {
-            write!(f, " . ").unwrap();
-            self.display_data_rec(f, &x.borrow());
+            self.display_data_rec(f, &x.data);
           }
+          /* no longer using nil to end lists
+          else if !x.data.is_nil() {
+            write!(f, " . ").unwrap();
+            self.display_data_rec(f, &x.data);
+          }
+          */
         }
         write!(f, ")")
       },
       Symbol(name) => write!(f, "{}", name),
-      String(x) => write!(f, "\"{}\"", x),
+      String(x) => write!(f, "\"{}\"", x.borrow()),
       Boolean(x) => write!(f, "{}", if *x { "#true" } else { "#false" }),
       Complex(r, i) => {
         if *i == 0.0 {
@@ -233,7 +237,7 @@ impl VM {
   ) -> Result<Gc<DataCell>, VMError> {
     use Data::*;
 
-    match *expr.borrow() {
+    match expr.data {
       // self-evaluating expressions
       Boolean(_)
       | String(_)
@@ -251,23 +255,25 @@ impl VM {
       )),
 
       // function application & special forms
-      List(ref exps) => match exps.front().as_ref() {
+      List(ref exps) => match exps.borrow().front().as_ref() {
         None => Err(VMError::new(
           EvalError::EmptyListEvaluation,
           expr.info.clone(),
         )),
-        Some(head) => match *head.borrow() {
+        Some(head) => match head.data {
           ///////////////////
           // special forms //
           ///////////////////
           Symbol(ref s) if *s == "lambda".into() => {
+            let exps = exps.borrow();
+            let exps_len = exps.len();
             // get lambda name, if applicable
-            let name = if exps.len() == 3 {
+            let name = if exps_len == 3 {
               // this is an anonymous lambda (without a name)
               None
-            } else if exps.len() == 4 {
+            } else if exps_len == 4 {
               // this lambda is named
-              if let Symbol(ref name) = *exps[1].borrow() {
+              if let Symbol(ref name) = exps[1].data {
                 Some(Rc::clone(name))
               } else {
                 return Err(VMError::new(
@@ -284,10 +290,10 @@ impl VM {
 
             // construct parameter list
             let mut parameters = Vec::new();
-            if let List(ref ps) = *exps[1].borrow() {
-              parameters.reserve_exact(ps.len());
-              for p in ps {
-                if let Symbol(ref s) = *p.borrow() {
+            if let List(ref ps) = exps[1].data {
+              parameters.reserve_exact(ps.borrow().len());
+              for p in ps.borrow().iter() {
+                if let Symbol(ref s) = p.data {
                   parameters.push(Rc::clone(s));
                 } else {
                   return Err(VMError::new(
@@ -315,6 +321,7 @@ impl VM {
           },
 
           Symbol(ref s) if *s == "quote".into() => {
+            let exps = exps.borrow();
             if exps.len() != 2 {
               Err(VMError::new(
                 EvalError::InvalidSpecialForm,
@@ -326,12 +333,13 @@ impl VM {
           },
 
           Symbol(ref s) if *s == "define".into() => {
+            let exps = exps.borrow();
             if exps.len() != 3 {
               Err(VMError::new(
                 EvalError::InvalidSpecialForm,
                 head.info.clone(),
               ))
-            } else if let Symbol(ref s) = &*exps[1].borrow() {
+            } else if let Symbol(ref s) = exps[1].data {
               env.bind(s, self.eval(env, Gc::clone(&exps[2]))?);
               Ok(DataCell::new_info(Data::nil(), head.info.clone()))
             } else {
@@ -343,6 +351,7 @@ impl VM {
           },
 
           Symbol(ref s) if *s == "set!".into() => {
+            let exps = exps.borrow();
             if exps.len() != 2 {
               Err(VMError::new(
                 EvalError::InvalidSpecialForm,
@@ -361,6 +370,7 @@ impl VM {
           },
 
           Symbol(ref s) if *s == "if".into() => {
+            let exps = exps.borrow();
             if exps.len() != 4 {
               Err(VMError::new(
                 EvalError::InvalidSpecialForm,
@@ -368,7 +378,7 @@ impl VM {
               ))
             } else {
               // evaluate condition
-              match &*self.eval(env, Gc::clone(&exps[1]))?.borrow() {
+              match self.eval(env, Gc::clone(&exps[1]))?.data {
                 Boolean(true) => self.eval(env, Gc::clone(&exps[2])),
                 Boolean(false) => self.eval(env, Gc::clone(&exps[3])),
                 _ => Err(VMError::new(
@@ -380,16 +390,17 @@ impl VM {
           },
 
           Symbol(ref s) if *s == "include".into() => {
+            let exps = exps.borrow();
             if exps.len() != 2 {
               Err(VMError::new(
                 EvalError::InvalidSpecialForm,
                 head.info.clone(),
               ))
             } else {
-              if let String(s) = &*exps[1].borrow() {
+              if let String(ref s) = exps[1].data {
                 // read file
                 let mut source = std::string::String::new();
-                match File::open(s) {
+                match File::open(&*s.borrow()) {
                   Ok(mut f) => match f.read_to_string(&mut source) {
                     Ok(_) => Ok(()),
                     Err(e) => Err(VMError::new(
@@ -424,8 +435,9 @@ impl VM {
 
           // function application
           _ => {
+            let exps = exps.borrow();
             let headval = self.eval(env, Gc::clone(*head))?;
-            let res = match *headval.borrow() {
+            let res = match headval.data {
               // procedure call
               Procedure {
                 ref name,
@@ -601,6 +613,7 @@ mod tests {
     error::SourceInfo,
     vm::VM,
   };
+  use gc::GcCell;
   use std::collections::VecDeque;
 
   #[test]
@@ -612,7 +625,7 @@ mod tests {
     let symbol = vm.symbols.add("jeremy");
     assert_eq!(vm.display_data(&symbol), "jeremy".to_owned());
 
-    let string = String("upright bass".to_owned());
+    let string = String(GcCell::new("upright bass".to_owned()));
     assert_eq!(vm.display_data(&string), "\"upright bass\"");
 
     let tru = Boolean(true);
@@ -629,23 +642,28 @@ mod tests {
     let nil = Data::nil();
     assert_eq!(vm.display_data(&nil), "()");
 
-    let list = List(
-      [symbol, string, tru, fals, int, float, nil]
+    let list = List(GcCell::new(
+      [symbol, string, tru, fals, int, float]
         .into_iter()
         .map(|e| DataCell::new_info(e, SourceInfo::blank()))
         .collect::<VecDeque<_>>(),
-    );
+    ));
     assert_eq!(
       vm.display_data(&list),
       "(jeremy \"upright bass\" #true #false 35 123.4)"
     );
 
-    let dotted = List(
-      [Real(12.0), String("oy".into()), Data::nil(), Real(0.23456)]
-        .into_iter()
-        .map(|e| DataCell::new_info(e, SourceInfo::blank()))
-        .collect::<VecDeque<_>>(),
-    );
+    let dotted = List(GcCell::new(
+      [
+        Real(12.0),
+        String(GcCell::new("oy".into())),
+        Data::nil(),
+        Real(0.23456),
+      ]
+      .into_iter()
+      .map(|e| DataCell::new_info(e, SourceInfo::blank()))
+      .collect::<VecDeque<_>>(),
+    ));
     assert_eq!(vm.display_data(&dotted), "(12 \"oy\" () . 0.23456)");
   }
 

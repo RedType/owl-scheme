@@ -55,7 +55,7 @@ pub fn import_std(vm: &mut VM) {
   // functions
   vm.def_builtin("number?", 1, |args| {
     let res = args.iter().fold(true, |a, x| {
-      a && match *x.borrow() {
+      a && match x.data {
         Complex(_, _) | Real(_) | Rational(_, _) | Integer(_) => true,
         _ => false,
       }
@@ -65,7 +65,7 @@ pub fn import_std(vm: &mut VM) {
 
   vm.def_builtin("complex?", 1, |args| {
     let res = args.iter().fold(true, |a, x| {
-      a && match *x.borrow() {
+      a && match x.data {
         Complex(_, _) | Real(_) | Rational(_, _) | Integer(_) => true,
         _ => false,
       }
@@ -75,7 +75,7 @@ pub fn import_std(vm: &mut VM) {
 
   vm.def_builtin("real?", 1, |args| {
     let res = args.iter().fold(true, |a, x| {
-      a && match *x.borrow() {
+      a && match x.data {
         Complex(_, i) => i == 0.0,
         Real(_) | Rational(_, _) | Integer(_) => true,
         _ => false,
@@ -86,7 +86,7 @@ pub fn import_std(vm: &mut VM) {
 
   vm.def_builtin("rational?", 1, |args| {
     let res = args.iter().fold(true, |a, x| {
-      a && match *x.borrow() {
+      a && match x.data {
         Complex(r, i) => i == 0.0 && r.round() == r,
         Real(n) => n.round() == n,
         Rational(_, _) | Integer(_) => true,
@@ -98,7 +98,7 @@ pub fn import_std(vm: &mut VM) {
 
   vm.def_builtin("integer?", 1, |args| {
     let res = args.iter().fold(true, |a, x| {
-      a && match *x.borrow() {
+      a && match x.data {
         Complex(r, i) => i == 0.0 && r.round() == r,
         Real(n) => n.round() == n,
         Rational(_, d) => d == 1,
@@ -111,7 +111,7 @@ pub fn import_std(vm: &mut VM) {
 
   vm.def_builtin("exact?", 1, |args| {
     let res = args.iter().fold(true, |a, x| {
-      a && match *x.borrow() {
+      a && match x.data {
         Rational(_, _) | Integer(_) => true,
         _ => false,
       }
@@ -121,7 +121,7 @@ pub fn import_std(vm: &mut VM) {
 
   vm.def_builtin("inexact?", 1, |args| {
     let res = args.iter().fold(true, |a, x| {
-      a && match *x.borrow() {
+      a && match x.data {
         Complex(_, _) | Real(_) => true,
         _ => false,
       }
@@ -131,7 +131,7 @@ pub fn import_std(vm: &mut VM) {
 
   vm.def_builtin("exact-integer?", 1, |args| {
     let res = args.iter().fold(true, |a, x| {
-      a && match *x.borrow() {
+      a && match x.data {
         Rational(_, d) => d == 1,
         Integer(_) => true,
         _ => false,
@@ -142,7 +142,7 @@ pub fn import_std(vm: &mut VM) {
 
   vm.def_builtin("finite?", 1, |args| {
     let res = args.iter().fold(true, |a, x| {
-      a && match *x.borrow() {
+      a && match x.data {
         Complex(r, i) => r.is_finite() && i.is_finite(),
         Real(n) => n.is_finite(),
         Rational(_, _) | Integer(_) => true,
@@ -154,7 +154,7 @@ pub fn import_std(vm: &mut VM) {
 
   vm.def_builtin("infinite?", 1, |args| {
     let res = args.iter().fold(true, |a, x| {
-      a && match *x.borrow() {
+      a && match x.data {
         Complex(r, i) => r.is_infinite() || i.is_infinite(),
         Real(n) => n.is_infinite(),
         _ => false,
@@ -164,7 +164,7 @@ pub fn import_std(vm: &mut VM) {
   });
 
   vm.def_builtin("+", 2, |xs| {
-    let res = xs.iter().fold(Integer(0), |a, x| match (a, &*x.borrow()) {
+    let res = xs.iter().fold(Integer(0), |a, x| match (a, &x.data) {
       (Integer(l), &Integer(r)) => Integer(l + r),
       (Integer(i), &Rational(n, d)) | (Rational(n, d), &Integer(i)) => {
         Rational(i * d as i64 + n, d)
@@ -200,7 +200,7 @@ pub fn import_std(vm: &mut VM) {
   });
 
   vm.def_builtin("*", 2, |xs| {
-    let res = xs.iter().fold(Integer(1), |a, x| match (a, &*x.borrow()) {
+    let res = xs.iter().fold(Integer(1), |a, x| match (a, &x.data) {
       (Integer(l), &Integer(r)) => Integer(l * r),
       (Integer(i), &Rational(n, d)) | (Rational(n, d), &Integer(i)) => {
         Rational(i * n, d)
@@ -238,15 +238,15 @@ pub fn import_std(vm: &mut VM) {
     if xs.len() == 0 {
       Err(Box::new(UnspecifiedError))
     } else if xs.len() == 1 {
-      return match &*xs[0].borrow() {
-        &Integer(x) => Ok(Integer(-x)),
-        &Real(x) => Ok(Real(-x)),
+      return match xs[0].data {
+        Integer(x) => Ok(Integer(-x)),
+        Real(x) => Ok(Real(-x)),
         _ => Err(Box::new(UnspecifiedError)),
       };
     } else {
       let mut xs_iter = xs.iter();
-      let minuend = xs_iter.next().unwrap().borrow().clone_numeric()?;
-      let res = xs_iter.fold(minuend, |a, x| match (a, &*x.borrow()) {
+      let minuend = xs_iter.next().unwrap().data.clone_numeric()?;
+      let res = xs_iter.fold(minuend, |a, x| match (a, &x.data) {
         (Integer(l), &Integer(r)) => Integer(l - r),
         (Real(l), &Integer(r)) => Real(l - r as f64),
         (Integer(l), &Real(r)) => Real(l as f64 - r),
@@ -265,21 +265,21 @@ pub fn import_std(vm: &mut VM) {
     if xs.len() == 0 {
       Err(Box::new(UnspecifiedError))
     } else if xs.len() == 1 {
-      return match &*xs[0].borrow() {
-        &Integer(x) => Ok(Real(1.0 / x as f64)),
-        &Real(x) => Ok(Real(1.0 / x)),
+      return match xs[0].data {
+        Integer(x) => Ok(Real(1.0 / x as f64)),
+        Real(x) => Ok(Real(1.0 / x)),
         _ => Err(Box::new(UnspecifiedError)),
       };
     } else {
       let mut xs_iter = xs.iter();
       let next_arg = xs_iter.next().unwrap();
-      let dividend = match next_arg.borrow().clone_numeric() {
+      let dividend = match next_arg.data.clone_numeric() {
         Ok(data) => data,
         Err(e) => {
           return Err(Box::new(e));
         },
       };
-      let res = xs_iter.fold(dividend, |a, x| match (a, &*x.borrow()) {
+      let res = xs_iter.fold(dividend, |a, x| match (a, &x.data) {
         (Integer(l), &Integer(r)) => Real(l as f64 / r as f64),
         (Real(l), &Integer(r)) => Real(l / r as f64),
         (Integer(l), &Real(r)) => Real(l as f64 / r),
@@ -305,32 +305,32 @@ mod tests {
 
     {
       let complex = vm.eval_str("(number? 5i)").unwrap();
-      assert_eq!(Data::Boolean(true), *complex.borrow());
+      assert_eq!(Data::Boolean(true), complex.data);
     }
 
     {
       let real = vm.eval_str("(number? 5.0)").unwrap();
-      assert_eq!(Data::Boolean(true), *real.borrow());
+      assert_eq!(Data::Boolean(true), real.data);
     }
 
     {
       let rational = vm.eval_str("(number? 2/3)").unwrap();
-      assert_eq!(Data::Boolean(true), *rational.borrow());
+      assert_eq!(Data::Boolean(true), rational.data);
     }
 
     {
       let integer = vm.eval_str("(number? 5)").unwrap();
-      assert_eq!(Data::Boolean(true), *integer.borrow());
+      assert_eq!(Data::Boolean(true), integer.data);
     }
 
     {
       let string = vm.eval_str("(number? \"hello\")").unwrap();
-      assert_eq!(Data::Boolean(false), *string.borrow());
+      assert_eq!(Data::Boolean(false), string.data);
     }
 
     {
       let nil = vm.eval_str("(number? '())").unwrap();
-      assert_eq!(Data::Boolean(false), *nil.borrow());
+      assert_eq!(Data::Boolean(false), nil.data);
     }
   }
 
@@ -340,32 +340,32 @@ mod tests {
 
     {
       let complex = vm.eval_str("(complex? 5i)").unwrap();
-      assert_eq!(Data::Boolean(true), *complex.borrow());
+      assert_eq!(Data::Boolean(true), complex.data);
     }
 
     {
       let real = vm.eval_str("(complex? 5.0)").unwrap();
-      assert_eq!(Data::Boolean(true), *real.borrow());
+      assert_eq!(Data::Boolean(true), real.data);
     }
 
     {
       let rational = vm.eval_str("(complex? 2/3)").unwrap();
-      assert_eq!(Data::Boolean(true), *rational.borrow());
+      assert_eq!(Data::Boolean(true), rational.data);
     }
 
     {
       let integer = vm.eval_str("(complex? 5)").unwrap();
-      assert_eq!(Data::Boolean(true), *integer.borrow());
+      assert_eq!(Data::Boolean(true), integer.data);
     }
 
     {
       let string = vm.eval_str("(complex? \"hello\")").unwrap();
-      assert_eq!(Data::Boolean(false), *string.borrow());
+      assert_eq!(Data::Boolean(false), string.data);
     }
 
     {
       let nil = vm.eval_str("(complex? '())").unwrap();
-      assert_eq!(Data::Boolean(false), *nil.borrow());
+      assert_eq!(Data::Boolean(false), nil.data);
     }
   }
 
@@ -375,37 +375,37 @@ mod tests {
 
     {
       let complex = vm.eval_str("(real? 0i)").unwrap();
-      assert_eq!(Data::Boolean(true), *complex.borrow());
+      assert_eq!(Data::Boolean(true), complex.data);
     }
 
     {
       let complex2 = vm.eval_str("(real? 1.0i)").unwrap();
-      assert_eq!(Data::Boolean(false), *complex2.borrow());
+      assert_eq!(Data::Boolean(false), complex2.data);
     }
 
     {
       let real = vm.eval_str("(real? 5.0)").unwrap();
-      assert_eq!(Data::Boolean(true), *real.borrow());
+      assert_eq!(Data::Boolean(true), real.data);
     }
 
     {
       let rational = vm.eval_str("(real? 2/3)").unwrap();
-      assert_eq!(Data::Boolean(true), *rational.borrow());
+      assert_eq!(Data::Boolean(true), rational.data);
     }
 
     {
       let integer = vm.eval_str("(real? 5)").unwrap();
-      assert_eq!(Data::Boolean(true), *integer.borrow());
+      assert_eq!(Data::Boolean(true), integer.data);
     }
 
     {
       let string = vm.eval_str("(real? \"hello\")").unwrap();
-      assert_eq!(Data::Boolean(false), *string.borrow());
+      assert_eq!(Data::Boolean(false), string.data);
     }
 
     {
       let nil = vm.eval_str("(real? '())").unwrap();
-      assert_eq!(Data::Boolean(false), *nil.borrow());
+      assert_eq!(Data::Boolean(false), nil.data);
     }
   }
 
@@ -415,47 +415,47 @@ mod tests {
 
     {
       let complex = vm.eval_str("(rational? 5+0i)").unwrap();
-      assert_eq!(Data::Boolean(true), *complex.borrow());
+      assert_eq!(Data::Boolean(true), complex.data);
     }
 
     {
       let complex2 = vm.eval_str("(rational? 5.3+0i)").unwrap();
-      assert_eq!(Data::Boolean(false), *complex2.borrow());
+      assert_eq!(Data::Boolean(false), complex2.data);
     }
 
     {
       let complex3 = vm.eval_str("(rational? 5+1i)").unwrap();
-      assert_eq!(Data::Boolean(false), *complex3.borrow());
+      assert_eq!(Data::Boolean(false), complex3.data);
     }
 
     {
       let real = vm.eval_str("(rational? 5.0)").unwrap();
-      assert_eq!(Data::Boolean(true), *real.borrow());
+      assert_eq!(Data::Boolean(true), real.data);
     }
 
     {
       let real2 = vm.eval_str("(rational? 5.3)").unwrap();
-      assert_eq!(Data::Boolean(false), *real2.borrow());
+      assert_eq!(Data::Boolean(false), real2.data);
     }
 
     {
       let rational = vm.eval_str("(rational? 2/3)").unwrap();
-      assert_eq!(Data::Boolean(true), *rational.borrow());
+      assert_eq!(Data::Boolean(true), rational.data);
     }
 
     {
       let integer = vm.eval_str("(rational? 5)").unwrap();
-      assert_eq!(Data::Boolean(true), *integer.borrow());
+      assert_eq!(Data::Boolean(true), integer.data);
     }
 
     {
       let string = vm.eval_str("(rational? \"hello\")").unwrap();
-      assert_eq!(Data::Boolean(false), *string.borrow());
+      assert_eq!(Data::Boolean(false), string.data);
     }
 
     {
       let nil = vm.eval_str("(rational? '())").unwrap();
-      assert_eq!(Data::Boolean(false), *nil.borrow());
+      assert_eq!(Data::Boolean(false), nil.data);
     }
   }
 
@@ -465,52 +465,52 @@ mod tests {
 
     {
       let complex = vm.eval_str("(integer? 5+0i)").unwrap();
-      assert_eq!(Data::Boolean(true), *complex.borrow());
+      assert_eq!(Data::Boolean(true), complex.data);
     }
 
     {
       let complex2 = vm.eval_str("(integer? 5.3+0i)").unwrap();
-      assert_eq!(Data::Boolean(false), *complex2.borrow());
+      assert_eq!(Data::Boolean(false), complex2.data);
     }
 
     {
       let complex3 = vm.eval_str("(integer? 5+1i)").unwrap();
-      assert_eq!(Data::Boolean(false), *complex3.borrow());
+      assert_eq!(Data::Boolean(false), complex3.data);
     }
 
     {
       let real = vm.eval_str("(integer? 5.0)").unwrap();
-      assert_eq!(Data::Boolean(true), *real.borrow());
+      assert_eq!(Data::Boolean(true), real.data);
     }
 
     {
       let real2 = vm.eval_str("(integer? 5.3)").unwrap();
-      assert_eq!(Data::Boolean(false), *real2.borrow());
+      assert_eq!(Data::Boolean(false), real2.data);
     }
 
     {
       let rational = vm.eval_str("(integer? 2/3)").unwrap();
-      assert_eq!(Data::Boolean(false), *rational.borrow());
+      assert_eq!(Data::Boolean(false), rational.data);
     }
 
     {
       let rational2 = vm.eval_str("(integer? 4/2)").unwrap();
-      assert_eq!(Data::Boolean(true), *rational2.borrow());
+      assert_eq!(Data::Boolean(true), rational2.data);
     }
 
     {
       let integer = vm.eval_str("(integer? 5)").unwrap();
-      assert_eq!(Data::Boolean(true), *integer.borrow());
+      assert_eq!(Data::Boolean(true), integer.data);
     }
 
     {
       let string = vm.eval_str("(integer? \"hello\")").unwrap();
-      assert_eq!(Data::Boolean(false), *string.borrow());
+      assert_eq!(Data::Boolean(false), string.data);
     }
 
     {
       let nil = vm.eval_str("(integer? '())").unwrap();
-      assert_eq!(Data::Boolean(false), *nil.borrow());
+      assert_eq!(Data::Boolean(false), nil.data);
     }
   }
 
@@ -520,32 +520,32 @@ mod tests {
 
     {
       let complex = vm.eval_str("(exact? 5+0i)").unwrap();
-      assert_eq!(Data::Boolean(false), *complex.borrow());
+      assert_eq!(Data::Boolean(false), complex.data);
     }
 
     {
       let real = vm.eval_str("(exact? 5.0)").unwrap();
-      assert_eq!(Data::Boolean(false), *real.borrow());
+      assert_eq!(Data::Boolean(false), real.data);
     }
 
     {
       let rational = vm.eval_str("(exact? 2/3)").unwrap();
-      assert_eq!(Data::Boolean(true), *rational.borrow());
+      assert_eq!(Data::Boolean(true), rational.data);
     }
 
     {
       let integer = vm.eval_str("(exact? 5)").unwrap();
-      assert_eq!(Data::Boolean(true), *integer.borrow());
+      assert_eq!(Data::Boolean(true), integer.data);
     }
 
     {
       let string = vm.eval_str("(exact? \"hello\")").unwrap();
-      assert_eq!(Data::Boolean(false), *string.borrow());
+      assert_eq!(Data::Boolean(false), string.data);
     }
 
     {
       let nil = vm.eval_str("(exact? '())").unwrap();
-      assert_eq!(Data::Boolean(false), *nil.borrow());
+      assert_eq!(Data::Boolean(false), nil.data);
     }
   }
 
@@ -555,32 +555,32 @@ mod tests {
 
     {
       let complex = vm.eval_str("(inexact? 5+0i)").unwrap();
-      assert_eq!(Data::Boolean(true), *complex.borrow());
+      assert_eq!(Data::Boolean(true), complex.data);
     }
 
     {
       let real = vm.eval_str("(inexact? 5.0)").unwrap();
-      assert_eq!(Data::Boolean(true), *real.borrow());
+      assert_eq!(Data::Boolean(true), real.data);
     }
 
     {
       let rational = vm.eval_str("(inexact? 2/3)").unwrap();
-      assert_eq!(Data::Boolean(false), *rational.borrow());
+      assert_eq!(Data::Boolean(false), rational.data);
     }
 
     {
       let integer = vm.eval_str("(inexact? 5)").unwrap();
-      assert_eq!(Data::Boolean(false), *integer.borrow());
+      assert_eq!(Data::Boolean(false), integer.data);
     }
 
     {
       let string = vm.eval_str("(inexact? \"hello\")").unwrap();
-      assert_eq!(Data::Boolean(false), *string.borrow());
+      assert_eq!(Data::Boolean(false), string.data);
     }
 
     {
       let nil = vm.eval_str("(inexact? '())").unwrap();
-      assert_eq!(Data::Boolean(false), *nil.borrow());
+      assert_eq!(Data::Boolean(false), nil.data);
     }
   }
 
@@ -590,37 +590,37 @@ mod tests {
 
     {
       let complex = vm.eval_str("(exact-integer? 5+0i)").unwrap();
-      assert_eq!(Data::Boolean(false), *complex.borrow());
+      assert_eq!(Data::Boolean(false), complex.data);
     }
 
     {
       let real = vm.eval_str("(exact-integer? 5.0)").unwrap();
-      assert_eq!(Data::Boolean(false), *real.borrow());
+      assert_eq!(Data::Boolean(false), real.data);
     }
 
     {
       let rational = vm.eval_str("(exact-integer? 2/3)").unwrap();
-      assert_eq!(Data::Boolean(false), *rational.borrow());
+      assert_eq!(Data::Boolean(false), rational.data);
     }
 
     {
       let rational2 = vm.eval_str("(exact-integer? 3/1)").unwrap();
-      assert_eq!(Data::Boolean(true), *rational2.borrow());
+      assert_eq!(Data::Boolean(true), rational2.data);
     }
 
     {
       let integer = vm.eval_str("(exact-integer? 5)").unwrap();
-      assert_eq!(Data::Boolean(true), *integer.borrow());
+      assert_eq!(Data::Boolean(true), integer.data);
     }
 
     {
       let string = vm.eval_str("(exact-integer? \"hello\")").unwrap();
-      assert_eq!(Data::Boolean(false), *string.borrow());
+      assert_eq!(Data::Boolean(false), string.data);
     }
 
     {
       let nil = vm.eval_str("(exact-integer? '())").unwrap();
-      assert_eq!(Data::Boolean(false), *nil.borrow());
+      assert_eq!(Data::Boolean(false), nil.data);
     }
   }
 
@@ -630,42 +630,42 @@ mod tests {
 
     {
       let inf = vm.eval_str("(finite? Inf)").unwrap();
-      assert_eq!(Data::Boolean(false), *inf.borrow());
+      assert_eq!(Data::Boolean(false), inf.data);
     }
 
     {
       let neg_inf = vm.eval_str("(finite? -Inf)").unwrap();
-      assert_eq!(Data::Boolean(false), *neg_inf.borrow());
+      assert_eq!(Data::Boolean(false), neg_inf.data);
     }
 
     {
       let complex = vm.eval_str("(finite? 5+0i)").unwrap();
-      assert_eq!(Data::Boolean(true), *complex.borrow());
+      assert_eq!(Data::Boolean(true), complex.data);
     }
 
     {
       let real = vm.eval_str("(finite? 5.0)").unwrap();
-      assert_eq!(Data::Boolean(true), *real.borrow());
+      assert_eq!(Data::Boolean(true), real.data);
     }
 
     {
       let rational = vm.eval_str("(finite? 2/3)").unwrap();
-      assert_eq!(Data::Boolean(true), *rational.borrow());
+      assert_eq!(Data::Boolean(true), rational.data);
     }
 
     {
       let integer = vm.eval_str("(finite? 5)").unwrap();
-      assert_eq!(Data::Boolean(true), *integer.borrow());
+      assert_eq!(Data::Boolean(true), integer.data);
     }
 
     {
       let string = vm.eval_str("(finite? \"hello\")").unwrap();
-      assert_eq!(Data::Boolean(false), *string.borrow());
+      assert_eq!(Data::Boolean(false), string.data);
     }
 
     {
       let nil = vm.eval_str("(finite? '())").unwrap();
-      assert_eq!(Data::Boolean(false), *nil.borrow());
+      assert_eq!(Data::Boolean(false), nil.data);
     }
   }
 
@@ -675,42 +675,42 @@ mod tests {
 
     {
       let inf = vm.eval_str("(infinite? Inf)").unwrap();
-      assert_eq!(Data::Boolean(true), *inf.borrow());
+      assert_eq!(Data::Boolean(true), inf.data);
     }
 
     {
       let neg_inf = vm.eval_str("(infinite? -Inf)").unwrap();
-      assert_eq!(Data::Boolean(true), *neg_inf.borrow());
+      assert_eq!(Data::Boolean(true), neg_inf.data);
     }
 
     {
       let complex = vm.eval_str("(infinite? 5+0i)").unwrap();
-      assert_eq!(Data::Boolean(false), *complex.borrow());
+      assert_eq!(Data::Boolean(false), complex.data);
     }
 
     {
       let real = vm.eval_str("(infinite? 5.0)").unwrap();
-      assert_eq!(Data::Boolean(false), *real.borrow());
+      assert_eq!(Data::Boolean(false), real.data);
     }
 
     {
       let rational = vm.eval_str("(infinite? 2/3)").unwrap();
-      assert_eq!(Data::Boolean(false), *rational.borrow());
+      assert_eq!(Data::Boolean(false), rational.data);
     }
 
     {
       let integer = vm.eval_str("(infinite? 5)").unwrap();
-      assert_eq!(Data::Boolean(false), *integer.borrow());
+      assert_eq!(Data::Boolean(false), integer.data);
     }
 
     {
       let string = vm.eval_str("(infinite? \"hello\")").unwrap();
-      assert_eq!(Data::Boolean(false), *string.borrow());
+      assert_eq!(Data::Boolean(false), string.data);
     }
 
     {
       let nil = vm.eval_str("(infinite? '())").unwrap();
-      assert_eq!(Data::Boolean(false), *nil.borrow());
+      assert_eq!(Data::Boolean(false), nil.data);
     }
   }
 
@@ -720,22 +720,22 @@ mod tests {
 
     {
       let integer = vm.eval_str("(+ 5 5)").unwrap();
-      assert_eq!(Data::Integer(10), *integer.borrow());
+      assert_eq!(Data::Integer(10), integer.data);
     }
 
     {
       let rational = vm.eval_str("(+ 5 10/2)").unwrap();
-      assert_eq!(Data::Rational(10, 1), *rational.borrow());
+      assert_eq!(Data::Rational(10, 1), rational.data);
     }
 
     {
       let real = vm.eval_str("(+ 5 5.0)").unwrap();
-      assert_eq!(Data::Real(10.0), *real.borrow());
+      assert_eq!(Data::Real(10.0), real.data);
     }
 
     {
       let complex = vm.eval_str("(+ 1 i)").unwrap();
-      assert_eq!(Data::Complex(1.0, 1.0), *complex.borrow());
+      assert_eq!(Data::Complex(1.0, 1.0), complex.data);
     }
   }
 }

@@ -1,5 +1,5 @@
 use crate::error::{ArithmeticError, SourceInfo};
-use gc::{Finalize, Gc, GcCell, GcCellRef, GcCellRefMut, Trace};
+use gc::{Finalize, Gc, GcCell, Trace};
 use std::{
   cell::RefCell,
   collections::{HashMap, HashSet, VecDeque},
@@ -23,7 +23,7 @@ impl fmt::Debug for dyn BuiltinFn {
 
 #[derive(Clone, Debug, Finalize, Trace)]
 pub struct DataCell {
-  pub data: GcCell<Data>,
+  pub data: Data,
   pub info: SourceInfo,
 }
 
@@ -33,26 +33,15 @@ impl DataCell {
   }
 
   pub fn new_info(data: Data, info: SourceInfo) -> Gc<Self> {
-    Gc::new(Self {
-      data: GcCell::new(data),
-      info,
-    })
-  }
-
-  pub fn borrow(&self) -> GcCellRef<Data> {
-    self.data.borrow()
-  }
-
-  pub fn borrow_mut(&self) -> GcCellRefMut<Data> {
-    self.data.borrow_mut()
+    Gc::new(Self { data, info })
   }
 }
 
 #[derive(Clone, Debug, Finalize, Trace)]
 pub enum Data {
-  List(VecDeque<Gc<DataCell>>),
+  List(GcCell<VecDeque<Gc<DataCell>>>),
   Symbol(Rc<str>),
-  String(String),
+  String(GcCell<String>),
   Boolean(bool),
   // first element is the fn name
   Builtin {
@@ -77,12 +66,12 @@ pub enum Data {
 
 impl Data {
   pub fn nil() -> Data {
-    Self::List(VecDeque::new())
+    Self::List(GcCell::new(VecDeque::new()))
   }
 
   pub fn is_nil(&self) -> bool {
     if let Self::List(xs) = self {
-      xs.is_empty()
+      xs.borrow().is_empty()
     } else {
       false
     }
@@ -105,12 +94,13 @@ impl PartialEq for Data {
 
     match (self, other) {
       (List(l), List(r)) => {
-        if l.len() != r.len() {
+        if l.borrow().len() != r.borrow().len() {
           false
         } else {
-          l.iter()
-            .zip(r.iter())
-            .map(|(l, r)| *l.borrow() == *r.borrow())
+          l.borrow()
+            .iter()
+            .zip(r.borrow().iter())
+            .map(|(l, r)| l.data == r.data)
             .fold(true, |a, x| a && x)
         }
       },
@@ -259,11 +249,16 @@ mod tests {
     let env = Env::new();
 
     let hello_sym = Rc::from("hello");
-    let hello_data = gcdata!(Data::String("Hello".into()));
+    let hello_data = gcdata!(Data::String(GcCell::new("Hello".into())));
     env.bind(&hello_sym, Gc::clone(&hello_data));
 
     let hello_lookup = env.lookup(&hello_sym).unwrap();
-    assert_eq!(*hello_lookup.borrow(), *hello_data.borrow());
+    match (&hello_lookup.data, &hello_data.data) {
+      (&Data::String(ref l), &Data::String(ref r)) => {
+        assert_eq!(*l.borrow(), *r.borrow());
+      },
+      _ => panic!(),
+    }
   }
 
   #[test]
@@ -271,17 +266,28 @@ mod tests {
     let env = Rc::new(Env::new());
 
     let hello_sym = Rc::from("hello");
-    let hello_data = gcdata!(Data::String("Hello".into()));
+    let hello_data = gcdata!(Data::String(GcCell::new("Hello".into())));
     env.bind(&hello_sym, Gc::clone(&hello_data));
 
     let nested_env = env.new_scope();
 
-    let goodbye_data = gcdata!(Data::String("Goodbye".into()));
+    let goodbye_data = gcdata!(Data::String(GcCell::new("Goodbye".into())));
     nested_env.bind(&hello_sym, Gc::clone(&goodbye_data));
 
     let global_lookup = env.lookup(&hello_sym).unwrap();
-    assert_eq!(*global_lookup.borrow(), *hello_data.borrow());
+    match (&global_lookup.data, &hello_data.data) {
+      (&Data::String(ref l), &Data::String(ref r)) => {
+        assert_eq!(*l.borrow(), *r.borrow());
+      },
+      _ => panic!(),
+    }
+
     let nested_lookup = nested_env.lookup(&hello_sym).unwrap();
-    assert_eq!(*nested_lookup.borrow(), *goodbye_data.borrow());
+    match (&nested_lookup.data, &goodbye_data.data) {
+      (&Data::String(ref l), &Data::String(ref r)) => {
+        assert_eq!(*l.borrow(), *r.borrow());
+      },
+      _ => panic!(),
+    }
   }
 }

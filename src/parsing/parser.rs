@@ -4,7 +4,7 @@ use crate::{
   parsing::lexer::{LexItem, Lexeme},
   vm::VM,
 };
-use gc::Gc;
+use gc::{Gc, GcCell};
 use std::{collections::VecDeque, iter::Peekable};
 
 impl VM {
@@ -32,11 +32,14 @@ impl VM {
   ) -> Result<Gc<DataCell>, VMError> {
     let mut list: VecDeque<Gc<DataCell>> = VecDeque::new();
     let mut dotted = false;
-  
+
     loop {
       match lexemes.peek() {
         None => {
-          return Err(VMError(Box::new(ParseError::MismatchedLParen), head_info));
+          return Err(VMError(
+            Box::new(ParseError::MismatchedLParen),
+            head_info,
+          ));
         },
         Some(LexItem(Lexeme::Dot, _)) => {
           dotted = true;
@@ -53,11 +56,14 @@ impl VM {
           }
           */
           lexemes.next();
-          return Ok(DataCell::new_info(Data::List(list), head_info));
+          return Ok(DataCell::new_info(
+            Data::List(GcCell::new(list)),
+            head_info,
+          ));
         },
         _ => {
           let next_data = self.parse_rec(lexemes)?;
-  
+
           // check for end of list if dotted
           if dotted {
             if let Some(LexItem(lexeme, info)) = lexemes.peek() {
@@ -69,13 +75,13 @@ impl VM {
               }
             }
           }
-  
+
           list.push_back(next_data);
         },
       }
     }
   }
-  
+
   fn parse_rec<I: Iterator<Item = LexItem>>(
     &mut self,
     lexemes: &mut Peekable<I>,
@@ -89,7 +95,7 @@ impl VM {
         DataCell::new_info(Data::Boolean(x), info)
       },
       Some(LexItem(Lexeme::String(x), info)) => {
-        DataCell::new_info(Data::String(x), info)
+        DataCell::new_info(Data::String(GcCell::new(x)), info)
       },
       Some(LexItem(Lexeme::Integer(x), info)) => {
         DataCell::new_info(Data::Integer(x), info)
@@ -106,17 +112,20 @@ impl VM {
       Some(LexItem(Lexeme::Complex(r, i), info)) => {
         DataCell::new_info(Data::Complex(r, i), info)
       },
-  
+
       Some(LexItem(Lexeme::LParen, info)) => self.parse_list(lexemes, info)?,
       Some(LexItem(Lexeme::RParen, info)) => {
         return Err(VMError(Box::new(ParseError::MismatchedRParen), info));
       },
       Some(LexItem(Lexeme::Quote, info)) => {
         if let Some(LexItem(Lexeme::RParen, info)) = lexemes.peek() {
-          return Err(VMError(Box::new(ParseError::QuotedRParen), info.clone()));
+          return Err(VMError(
+            Box::new(ParseError::QuotedRParen),
+            info.clone(),
+          ));
         }
         DataCell::new_info(
-          Data::List(
+          Data::List(GcCell::new(
             [
               DataCell::new_info(self.symbols.add("quote"), info.clone()),
               self.parse_rec(lexemes)?,
@@ -124,14 +133,14 @@ impl VM {
               //Gc::new(GcCell::new(Data::nil())),
             ]
             .into(),
-          ),
+          )),
           info,
         )
       },
-  
+
       None => panic!("Tried to parse nothing"),
     };
-  
+
     Ok(data)
   }
 }
@@ -143,10 +152,11 @@ mod tests {
     error::{ParseError, SourceInfo},
     vm::VM,
   };
+  use gc::GcCell;
 
   macro_rules! l {
     [$($x:expr),+$(,)?] => {
-      Data::List([$(DataCell::new_info($x, SourceInfo::blank())),+].into())
+      Data::List(GcCell::new([$(DataCell::new_info($x, SourceInfo::blank())),+].into()))
     }
   }
 
@@ -156,7 +166,7 @@ mod tests {
       let results = $vm.build_ast(lexemes).unwrap();
       results
         .into_iter()
-        .map(|r| r.data.clone().into_inner())
+        .map(|r| r.data.clone())
         .collect::<Vec<_>>()
     }};
   }
