@@ -447,6 +447,10 @@ impl VM {
                 ref code,
               } => {
                 let given_args_len = exps.len() - 1;
+                // short circuit if no arguments given to a non-zero-arg function
+                if parameters.len() != 0 && given_args_len == 0 {
+                  return Ok(headval);
+                }
                 self.apply(
                   &env,
                   name,
@@ -467,7 +471,10 @@ impl VM {
                 ref code,
               } => {
                 let given_args_len = exps.len() - 1;
-
+                // short circuit if no arguments given to a non-zero-arg function
+                if parameters != 0 && given_args_len == 0 {
+                  return Ok(headval);
+                }
                 self.apply_builtin(
                   env,
                   name,
