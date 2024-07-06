@@ -480,7 +480,7 @@ impl VM {
 fn is_identifier_char(ch: char) -> bool {
   match ch {
     '\'' | '+' | '=' | '/' | '|' | ':' | '<' | '>' | ',' | '.' | '?' | '!'
-    | '@' | '#' | '$' | '%' | '^' | '&' | '*' | '_' => true,
+    | '@' | '#' | '$' | '%' | '^' | '&' | '*' | '-' | '_' => true,
     ch if ch.is_alphanumeric() => true,
     _ => false,
   }
@@ -601,6 +601,10 @@ mod tests {
     let actual_qmark = lex_str!(vm, "huh?");
     let expected_qmark = vec![Lexeme::Symbol(vm.symbols.get("huh?").unwrap())];
     assert_eq!(expected_qmark, actual_qmark);
+
+    let actual_dashed = lex_str!(vm, "my-symbol");
+    let expected_dashed = vec![Lexeme::Symbol(vm.symbols.get("my-symbol").unwrap())];
+    assert_eq!(expected_dashed, actual_dashed);
 
     // should these produce an error?
     let actual_fake_true = lex_str!(vm, "#tr");
