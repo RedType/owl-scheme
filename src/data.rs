@@ -28,6 +28,10 @@ pub struct DataCell {
 }
 
 impl DataCell {
+  pub fn new(data: Data) -> Gc<Self> {
+    Self::new_info(data, SourceInfo::blank())
+  }
+
   pub fn new_info(data: Data, info: SourceInfo) -> Gc<Self> {
     Gc::new(Self {
       data: GcCell::new(data),
@@ -154,6 +158,7 @@ impl SymbolTable {
   }
 }
 
+#[derive(Debug)]
 pub struct Env {
   bindings: RefCell<HashMap<Rc<str>, Gc<DataCell>>>,
   prev_scope: Option<Rc<Env>>,
@@ -218,7 +223,7 @@ mod tests {
     let mut table = SymbolTable::new();
 
     let asdf_sym = table.add("asdf");
-    let fdsa_sym = table.add("fdsa");
+    let fdsa_sym = table.add("fdsa?");
     let asdf2_sym = table.add("asdf");
     let asdf = unsym!(asdf_sym);
     let fdsa = unsym!(fdsa_sym);
@@ -228,7 +233,7 @@ mod tests {
     assert_eq!(asdf_sym, asdf2_sym);
 
     assert_eq!(asdf, &Rc::from("asdf"));
-    assert_eq!(fdsa, &Rc::from("fdsa"));
+    assert_eq!(fdsa, &Rc::from("fdsa?"));
     assert_eq!(asdf2, &Rc::from("asdf"));
   }
 
