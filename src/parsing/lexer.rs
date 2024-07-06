@@ -17,7 +17,7 @@ pub enum Lexeme {
   Integer(i64),
   Float(f64),
   Complex(f64, f64),
-  Rational(i64, u64),
+  Rational(i64, i64),
 }
 
 impl PartialEq for Lexeme {
@@ -453,7 +453,7 @@ impl VM {
                 push_lex!(Lexeme::Complex(*real_part, imag_part));
               } else if *rational {
                 let denominator = conv_int()?;
-                push_lex!(Lexeme::Rational(*numerator, denominator as u64));
+                push_lex!(Lexeme::Rational(*numerator, denominator));
               } else if let Ok(int) = conv_int() {
                 push_lex!(Lexeme::Integer(int));
               } else {

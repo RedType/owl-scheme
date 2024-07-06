@@ -53,7 +53,7 @@ pub fn import_std(vm: &mut VM) {
   }
 
   // functions
-  vm.def_builtin("number?", 1, |args| {
+  vm.def_builtin("number?", 1, |_, args| {
     let res = args.iter().fold(true, |a, x| {
       a && match x.data {
         Complex(_, _) | Real(_) | Rational(_, _) | Integer(_) => true,
@@ -63,7 +63,7 @@ pub fn import_std(vm: &mut VM) {
     Ok(Boolean(res))
   });
 
-  vm.def_builtin("complex?", 1, |args| {
+  vm.def_builtin("complex?", 1, |_, args| {
     let res = args.iter().fold(true, |a, x| {
       a && match x.data {
         Complex(_, _) | Real(_) | Rational(_, _) | Integer(_) => true,
@@ -73,7 +73,7 @@ pub fn import_std(vm: &mut VM) {
     Ok(Boolean(res))
   });
 
-  vm.def_builtin("real?", 1, |args| {
+  vm.def_builtin("real?", 1, |_, args| {
     let res = args.iter().fold(true, |a, x| {
       a && match x.data {
         Complex(_, i) => i == 0.0,
@@ -84,7 +84,7 @@ pub fn import_std(vm: &mut VM) {
     Ok(Boolean(res))
   });
 
-  vm.def_builtin("rational?", 1, |args| {
+  vm.def_builtin("rational?", 1, |_, args| {
     let res = args.iter().fold(true, |a, x| {
       a && match x.data {
         Complex(r, i) => i == 0.0 && r.round() == r,
@@ -96,7 +96,7 @@ pub fn import_std(vm: &mut VM) {
     Ok(Boolean(res))
   });
 
-  vm.def_builtin("integer?", 1, |args| {
+  vm.def_builtin("integer?", 1, |_, args| {
     let res = args.iter().fold(true, |a, x| {
       a && match x.data {
         Complex(r, i) => i == 0.0 && r.round() == r,
@@ -109,7 +109,7 @@ pub fn import_std(vm: &mut VM) {
     Ok(Boolean(res))
   });
 
-  vm.def_builtin("exact?", 1, |args| {
+  vm.def_builtin("exact?", 1, |_, args| {
     let res = args.iter().fold(true, |a, x| {
       a && match x.data {
         Rational(_, _) | Integer(_) => true,
@@ -119,7 +119,7 @@ pub fn import_std(vm: &mut VM) {
     Ok(Boolean(res))
   });
 
-  vm.def_builtin("inexact?", 1, |args| {
+  vm.def_builtin("inexact?", 1, |_, args| {
     let res = args.iter().fold(true, |a, x| {
       a && match x.data {
         Complex(_, _) | Real(_) => true,
@@ -129,7 +129,7 @@ pub fn import_std(vm: &mut VM) {
     Ok(Boolean(res))
   });
 
-  vm.def_builtin("exact-integer?", 1, |args| {
+  vm.def_builtin("exact-integer?", 1, |_, args| {
     let res = args.iter().fold(true, |a, x| {
       a && match x.data {
         Rational(_, d) => d == 1,
@@ -140,7 +140,7 @@ pub fn import_std(vm: &mut VM) {
     Ok(Boolean(res))
   });
 
-  vm.def_builtin("finite?", 1, |args| {
+  vm.def_builtin("finite?", 1, |_, args| {
     let res = args.iter().fold(true, |a, x| {
       a && match x.data {
         Complex(r, i) => r.is_finite() && i.is_finite(),
@@ -152,7 +152,7 @@ pub fn import_std(vm: &mut VM) {
     Ok(Boolean(res))
   });
 
-  vm.def_builtin("infinite?", 1, |args| {
+  vm.def_builtin("infinite?", 1, |_, args| {
     let res = args.iter().fold(true, |a, x| {
       a && match x.data {
         Complex(r, i) => r.is_infinite() || i.is_infinite(),
@@ -163,11 +163,11 @@ pub fn import_std(vm: &mut VM) {
     Ok(Boolean(res))
   });
 
-  vm.def_builtin("+", 2, |xs| {
+  vm.def_builtin("+", 2, |vm, xs| {
     xs.iter().fold(Ok(Integer(0)), |a, x| match (a, &x.data) {
       (Ok(Integer(l)), &Integer(r)) => Ok(Integer(l + r)),
       (Ok(Integer(i)), &Rational(n, d)) | (Ok(Rational(n, d)), &Integer(i)) => {
-        Ok(Rational(i * d as i64 + n, d))
+        Ok(vm.rational(i * d + n, d))
       },
       (Ok(Integer(i)), &Real(r)) | (Ok(Real(r)), &Integer(i)) => {
         Ok(Real(r + i as f64))
@@ -176,9 +176,9 @@ pub fn import_std(vm: &mut VM) {
         Ok(Complex(r + n as f64, i))
       },
       (Ok(Rational(ln, ld)), &Rational(rn, rd)) => {
-        let n = ln * rd as i64 + rn * ld as i64;
+        let n = ln * rd + rn * ld;
         let d = ld * rd;
-        Ok(Rational(n, d))
+        Ok(vm.rational(n, d))
       },
       (Ok(Rational(n, d)), &Real(r)) | (Ok(Real(r)), &Rational(n, d)) => {
         Ok(Real((n as f64 / d as f64) + r))
@@ -194,83 +194,108 @@ pub fn import_std(vm: &mut VM) {
       (Ok(Complex(lr, li)), &Complex(rr, ri)) => Ok(Complex(lr + rr, li + ri)),
 
       (Err(l), _) => Err(l),
-
       (Ok(_), r) => {
         Err(Box::new(ArithmeticError::NonNumericArgument(r.clone())))
       },
     })
   });
 
-  vm.def_builtin("*", 2, |xs| {
-    let res = xs.iter().fold(Integer(1), |a, x| match (a, &x.data) {
-      (Integer(l), &Integer(r)) => Integer(l * r),
-      (Integer(i), &Rational(n, d)) | (Rational(n, d), &Integer(i)) => {
-        Rational(i * n, d)
+  vm.def_builtin("*", 2, |vm, xs| {
+    xs.iter().fold(Ok(Integer(1)), |a, x| match (a, &x.data) {
+      (Ok(Integer(l)), &Integer(r)) => Ok(Integer(l * r)),
+      (Ok(Integer(i)), &Rational(n, d)) | (Ok(Rational(n, d)), &Integer(i)) => {
+        Ok(vm.rational(i * n, d))
       },
-      (Integer(i), &Real(r)) | (Real(r), &Integer(i)) => Real(r * i as f64),
-      (Integer(n), &Complex(r, i)) | (Complex(r, i), &Integer(n)) => {
-        Complex(r * n as f64, i * n as f64)
+      (Ok(Integer(i)), &Real(r)) | (Ok(Real(r)), &Integer(i)) => {
+        Ok(Real(r * i as f64))
       },
-      (Rational(ln, ld), &Rational(rn, rd)) => Rational(ln * rn, ld * rd),
-      (Rational(n, d), &Real(r)) | (Real(r), &Rational(n, d)) => {
-        Real((n as f64 / d as f64) * r)
+      (Ok(Integer(n)), &Complex(r, i)) | (Ok(Complex(r, i)), &Integer(n)) => {
+        Ok(Complex(r * n as f64, i * n as f64))
       },
-      (Rational(n, d), &Complex(r, i)) | (Complex(r, i), &Rational(n, d)) => {
+      (Ok(Rational(ln, ld)), &Rational(rn, rd)) => {
+        Ok(vm.rational(ln * rn, ld * rd))
+      },
+      (Ok(Rational(n, d)), &Real(r)) | (Ok(Real(r)), &Rational(n, d)) => {
+        Ok(Real((n as f64 / d as f64) * r))
+      },
+      (Ok(Rational(n, d)), &Complex(r, i))
+      | (Ok(Complex(r, i)), &Rational(n, d)) => {
         let rat = n as f64 / d as f64;
-        Complex(rat * r, rat * i)
+        Ok(Complex(rat * r, rat * i))
       },
-      (Real(l), &Real(r)) => Real(l * r),
-      (Real(n), &Complex(r, i)) | (Complex(r, i), &Real(n)) => {
-        Complex(n * r, n * i)
+      (Ok(Real(l)), &Real(r)) => Ok(Real(l * r)),
+      (Ok(Real(n)), &Complex(r, i)) | (Ok(Complex(r, i)), &Real(n)) => {
+        Ok(Complex(n * r, n * i))
       },
-      (Complex(lr, li), &Complex(rr, ri)) => {
-        Complex(lr * rr - li * ri, lr * ri + li * rr)
+      (Ok(Complex(lr, li)), &Complex(rr, ri)) => {
+        Ok(Complex(lr * rr - li * ri, lr * ri + li * rr))
       },
 
-      _ => Data::nil(),
-    });
-    if res.is_nil() {
-      Err(Box::new(UnspecifiedError))
-    } else {
-      Ok(res)
-    }
+      (Err(l), _) => Err(l),
+      (Ok(_), r) => {
+        Err(Box::new(ArithmeticError::NonNumericArgument(r.clone())))
+      },
+    })
   });
 
-  vm.def_builtin("-", 2, |xs| {
+  vm.def_builtin("-", 2, |vm, xs| {
     if xs.len() == 0 {
       Err(Box::new(UnspecifiedError))
     } else if xs.len() == 1 {
       return match xs[0].data {
         Integer(x) => Ok(Integer(-x)),
         Real(x) => Ok(Real(-x)),
-        _ => Err(Box::new(UnspecifiedError)),
+        Rational(n, d) => Ok(vm.rational(-n, d)),
+        Complex(r, i) => Ok(Complex(-r, -i)),
+        ref x => Err(Box::new(ArithmeticError::NonNumericArgument(x.clone()))),
       };
     } else {
       let mut xs_iter = xs.iter();
       let minuend = xs_iter.next().unwrap().data.clone_numeric()?;
-      let res = xs_iter.fold(minuend, |a, x| match (a, &x.data) {
-        (Integer(l), &Integer(r)) => Integer(l - r),
-        (Real(l), &Integer(r)) => Real(l - r as f64),
-        (Integer(l), &Real(r)) => Real(l as f64 - r),
-        (Real(l), &Real(r)) => Real(l - r),
-        _ => Data::nil(),
-      });
-      if res.is_nil() {
-        Err(Box::new(UnspecifiedError))
-      } else {
-        Ok(res)
-      }
+      xs_iter.fold(Ok(minuend), |a, x| match (a, &x.data) {
+        (Ok(Integer(l)), &Integer(r)) => Ok(Integer(l - r)),
+        (Ok(Integer(l)), &Real(r)) => Ok(Real(l as f64 - r)),
+        (Ok(Integer(l)), &Rational(n, d)) => Ok(vm.rational(l * d - n, d)),
+        (Ok(Integer(l)), &Complex(r, i)) => Ok(Complex(l as f64 - r, -i)),
+        (Ok(Real(l)), &Integer(r)) => Ok(Real(l - r as f64)),
+        (Ok(Real(l)), &Real(r)) => Ok(Real(l - r)),
+        (Ok(Real(l)), &Rational(n, d)) => Ok(Real(l - n as f64 / d as f64)),
+        (Ok(Real(l)), &Complex(r, i)) => Ok(Complex(l - r, i)),
+        (Ok(Rational(n, d)), &Integer(r)) => Ok(vm.rational(n - r * d, d)),
+        (Ok(Rational(n, d)), &Real(r)) => Ok(Real(n as f64 / d as f64 - r)),
+        (Ok(Rational(ln, ld)), &Rational(rn, rd)) => {
+          Ok(vm.rational(ln * rd - rn * ld, ld * rd))
+        },
+        (Ok(Rational(n, d)), &Complex(r, i)) => {
+          Ok(Complex(n as f64 / d as f64 - r, i))
+        },
+        (Ok(Complex(lr, i)), &Integer(r)) => Ok(Complex(lr - r as f64, i)),
+        (Ok(Complex(lr, i)), &Real(r)) => Ok(Complex(lr - r, i)),
+        (Ok(Complex(lr, i)), &Rational(n, d)) => {
+          Ok(Complex(lr - n as f64 / d as f64, i))
+        },
+        (Ok(Complex(lr, li)), &Complex(rr, ri)) => {
+          Ok(Complex(lr - rr, li - ri))
+        },
+
+        (Err(l), _) => Err(l),
+        (Ok(_), r) => {
+          Err(Box::new(ArithmeticError::NonNumericArgument(r.clone())))
+        },
+      })
     }
   });
 
-  vm.def_builtin("/", 2, |xs| {
+  vm.def_builtin("/", 2, |vm, xs| {
     if xs.len() == 0 {
       Err(Box::new(UnspecifiedError))
     } else if xs.len() == 1 {
       return match xs[0].data {
         Integer(x) => Ok(Real(1.0 / x as f64)),
         Real(x) => Ok(Real(1.0 / x)),
-        _ => Err(Box::new(UnspecifiedError)),
+        Rational(n, d) => Ok(vm.rational(d, n)),
+        Complex(r, i) => Ok(Complex(1.0 / r, 1.0 / i)),
+        ref x => Err(Box::new(ArithmeticError::NonNumericArgument(x.clone()))),
       };
     } else {
       let mut xs_iter = xs.iter();
@@ -281,18 +306,42 @@ pub fn import_std(vm: &mut VM) {
           return Err(Box::new(e));
         },
       };
-      let res = xs_iter.fold(dividend, |a, x| match (a, &x.data) {
-        (Integer(l), &Integer(r)) => Real(l as f64 / r as f64),
-        (Real(l), &Integer(r)) => Real(l / r as f64),
-        (Integer(l), &Real(r)) => Real(l as f64 / r),
-        (Real(l), &Real(r)) => Real(l / r),
-        _ => Data::nil(),
-      });
-      if res.is_nil() {
-        Err(Box::new(UnspecifiedError))
-      } else {
-        Ok(res)
-      }
+      xs_iter.fold(Ok(dividend), |a, x| match (a, &x.data) {
+        (Ok(Integer(l)), &Integer(r)) => Ok(Real(l as f64 / r as f64)),
+        (Ok(Integer(l)), &Real(r)) => Ok(Real(l as f64 / r)),
+        (Ok(Integer(l)), &Rational(n, d)) => Ok(Rational(l * d as i64, n)),
+        (Ok(Integer(l)), &Complex(r, i)) => Ok(Complex(l as f64 / r, l as f64 / i)),
+        (Ok(Real(l)), &Integer(r)) => Ok(Real(l / r as f64)),
+        (Ok(Real(l)), &Real(r)) => Ok(Real(l / r)),
+        (Ok(Real(l)), &Rational(n, d)) => Ok(Real(l / n as f64 * d as f64)),
+        (Ok(Real(l)), &Complex(r, i)) => Ok(Complex(l / r, l / i)),
+        (Ok(Rational(n, d)), &Integer(r)) => Ok(vm.rational(n, d * r)),
+        (Ok(Rational(n, d)), &Real(r)) => Ok(Real(n as f64 / d as f64 / r)),
+        (Ok(Rational(ln, ld)), &Rational(rn, rd)) => {
+          Ok(vm.rational(ln * rd, ld * rn))
+        },
+        (Ok(Rational(n, d)), &Complex(r, i)) => {
+          let rat = n as f64 / d as f64;
+          Ok(Complex(rat / r, rat / i))
+        },
+
+        (Ok(Complex(lr, i)), &Integer(r)) => Ok(Complex(lr / r as f64, i / r as f64)),
+        (Ok(Complex(lr, i)), &Real(r)) => Ok(Complex(lr / r, i / r)),
+        (Ok(Complex(lr, i)), &Rational(n, d)) => {
+          let rat = n as f64 / d as f64;
+          Ok(Complex(lr / rat, i / rat))
+        },
+        (Ok(Complex(lr, li)), &Complex(rr, ri)) => {
+          let real = lr / rr + li / ri;
+          let imag = lr / ri + li / rr;
+          Ok(Complex(real, imag))
+        },
+
+        (Err(l), _) => Err(l),
+        (Ok(_), r) => {
+          Err(Box::new(ArithmeticError::NonNumericArgument(r.clone())))
+        },
+      })
     }
   });
 }
@@ -738,6 +787,81 @@ mod tests {
     {
       let complex = vm.eval_str("(+ 1 i)").unwrap();
       assert_eq!(Data::Complex(1.0, 1.0), complex.data);
+    }
+  }
+
+  #[test]
+  fn multiplication() {
+    let mut vm = VM::new();
+
+    {
+      let integer = vm.eval_str("(* 5 5)").unwrap();
+      assert_eq!(Data::Integer(25), integer.data);
+    }
+
+    {
+      let rational = vm.eval_str("(* 5 10/2)").unwrap();
+      assert_eq!(Data::Rational(25, 1), rational.data);
+    }
+
+    {
+      let real = vm.eval_str("(* 5 5.0)").unwrap();
+      assert_eq!(Data::Real(25.0), real.data);
+    }
+
+    {
+      let complex = vm.eval_str("(* 1 i)").unwrap();
+      assert_eq!(Data::Complex(0.0, 1.0), complex.data);
+    }
+  }
+
+  #[test]
+  fn subtraction() {
+    let mut vm = VM::new();
+
+    {
+      let integer = vm.eval_str("(- 5 5)").unwrap();
+      assert_eq!(Data::Integer(0), integer.data);
+    }
+
+    {
+      let rational = vm.eval_str("(- 5 10/2)").unwrap();
+      assert_eq!(Data::Rational(0, 1), rational.data);
+    }
+
+    {
+      let real = vm.eval_str("(- 5 5.0)").unwrap();
+      assert_eq!(Data::Real(0.0), real.data);
+    }
+
+    {
+      let complex = vm.eval_str("(- 1 i)").unwrap();
+      assert_eq!(Data::Complex(1.0, -1.0), complex.data);
+    }
+  }
+
+  #[test]
+  fn division() {
+    let mut vm = VM::new();
+
+    {
+      let integer = vm.eval_str("(/ 5 5)").unwrap();
+      assert_eq!(Data::Real(1.0), integer.data);
+    }
+
+    {
+      let rational = vm.eval_str("(/ 5 10/2)").unwrap();
+      assert_eq!(Data::Rational(1, 1), rational.data);
+    }
+
+    {
+      let real = vm.eval_str("(/ 5 5.0)").unwrap();
+      assert_eq!(Data::Real(1.0), real.data);
+    }
+
+    {
+      let complex = vm.eval_str("(/ i 1)").unwrap();
+      assert_eq!(Data::Complex(0.0, 1.0), complex.data);
     }
   }
 }

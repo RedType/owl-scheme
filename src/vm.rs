@@ -123,6 +123,22 @@ impl VM {
     common_factors.iter().fold(1, |a, f| a * f)
   }
 
+  pub fn rational(&mut self, n: i64, d: i64) -> Data {
+    let gcf = self.gcf(n.abs() as u64, d.abs() as u64) as i64;
+
+    if n >= 0 && d >= 0 {
+      Data::Rational(n / gcf, d / gcf)
+    } else if n >= 0 && d < 0 {
+      Data::Rational(-n / gcf, -d / gcf)
+    } else if n < 0 && d >= 0 {
+      Data::Rational(n / gcf, d / gcf)
+    } else if n < 0 && d < 0 {
+      Data::Rational(-n / gcf, -d / gcf)
+    } else {
+      unreachable!();
+    }
+  }
+
   pub fn display_data(&mut self, d: &Data) -> String {
     let mut output = String::new();
     self.display_data_rec(&mut output, d);
@@ -178,16 +194,12 @@ impl VM {
       },
       Real(x) => write!(f, "{}", x),
       Rational(n, d) => {
-        // reduce
-        let gcf = self.gcf(n.abs() as u64, *d);
-        let (rn, rd) = (*n / gcf as i64, *d / gcf);
-
-        if rd == 1 {
-          write!(f, "{}", rn)
-        } else if rn == 0 {
+        if *d == 1 {
+          write!(f, "{}", *n)
+        } else if *n == 0 {
           write!(f, "0")
         } else {
-          write!(f, "{}/{}", rn, rd)
+          write!(f, "{}/{}", *n, *d)
         }
       },
       Integer(x) => write!(f, "{}", x),
@@ -613,7 +625,7 @@ impl VM {
       }
 
       // evaluate and return
-      code(&collected_arguments)
+      code(self, &collected_arguments)
         .map(|data| DataCell::new_info(data, info.clone()))
         .map_err(|err| VMError(err, info.clone()))
     } else {

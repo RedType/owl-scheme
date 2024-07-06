@@ -104,10 +104,7 @@ impl VM {
         DataCell::new_info(Data::Real(x), info)
       },
       Some(LexItem(Lexeme::Rational(n, d), info)) => {
-        // reduce rational
-        let gcf = self.gcf(n.abs() as u64, d);
-        let (rn, rd) = (n / gcf as i64, d / gcf);
-        DataCell::new_info(Data::Rational(rn, rd), info)
+        DataCell::new_info(self.rational(n, d), info)
       },
       Some(LexItem(Lexeme::Complex(r, i), info)) => {
         DataCell::new_info(Data::Complex(r, i), info)

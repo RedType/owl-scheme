@@ -1,4 +1,7 @@
-use crate::error::{ArithmeticError, SourceInfo};
+use crate::{
+  error::{ArithmeticError, SourceInfo},
+  vm::VM,
+};
 use gc::{Finalize, Gc, GcCell, Trace};
 use std::{
   cell::RefCell,
@@ -10,10 +13,10 @@ use std::{
 
 // trait alias
 pub trait BuiltinFn:
-  Fn(&[Gc<DataCell>]) -> Result<Data, Box<dyn Error>>
+  Fn(&mut VM, &[Gc<DataCell>]) -> Result<Data, Box<dyn Error>>
 {
 }
-impl<T: Fn(&[Gc<DataCell>]) -> Result<Data, Box<dyn Error>>> BuiltinFn for T {}
+impl<T: Fn(&mut VM, &[Gc<DataCell>]) -> Result<Data, Box<dyn Error>>> BuiltinFn for T {}
 
 impl fmt::Debug for dyn BuiltinFn {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -60,7 +63,7 @@ pub enum Data {
   // numbers
   Complex(f64, f64),
   Real(f64),
-  Rational(i64, u64),
+  Rational(i64, i64),
   Integer(i64),
 }
 
