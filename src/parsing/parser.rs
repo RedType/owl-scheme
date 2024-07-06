@@ -1,5 +1,5 @@
 use crate::{
-  data::{Data, DataCell, SymbolTable},
+  data::{Data, DataCell},
   error::{ParseError, SourceInfo, VMError},
   parsing::lexer::{LexItem, Lexeme},
   vm::VM,
@@ -19,118 +19,121 @@ impl VM {
     let mut data = Vec::new();
 
     while let Some(_) = lexemes.peek() {
-      data.push(parse_rec(&mut lexemes, &mut self.symbols)?);
+      data.push(self.parse_rec(&mut lexemes)?);
     }
 
     Ok(data)
   }
-}
 
-fn parse_list<I: Iterator<Item = LexItem>>(
-  lexemes: &mut Peekable<I>,
-  symbols: &mut SymbolTable,
-  head_info: SourceInfo,
-) -> Result<Gc<DataCell>, VMError> {
-  let mut list: VecDeque<Gc<DataCell>> = VecDeque::new();
-  let mut dotted = false;
-
-  loop {
-    match lexemes.peek() {
-      None => {
-        return Err(VMError(Box::new(ParseError::MismatchedLParen), head_info));
-      },
-      Some(LexItem(Lexeme::Dot, _)) => {
-        dotted = true;
-        lexemes.next();
-      },
-      Some(LexItem(Lexeme::RParen, _)) => {
-        /* no longer ending lists with nil--assume its presence.
-         * this means that the dot lexeme is now meaningless,
-         * which is fine
-         *
-        // end list with nil (if it isn't already nil)
-        if !dotted && !list.is_empty() {
-          list.push_back(Gc::new(GcCell::new(Data::nil())));
-        }
-        */
-        lexemes.next();
-        return Ok(DataCell::new_info(Data::List(list), head_info));
-      },
-      _ => {
-        let next_data = parse_rec(lexemes, symbols)?;
-
-        // check for end of list if dotted
-        if dotted {
-          if let Some(LexItem(lexeme, info)) = lexemes.peek() {
-            if *lexeme != Lexeme::RParen {
-              return Err(VMError(
-                Box::new(ParseError::WronglyDottedList),
-                info.clone(),
-              ));
+  fn parse_list<I: Iterator<Item = LexItem>>(
+    &mut self,
+    lexemes: &mut Peekable<I>,
+    head_info: SourceInfo,
+  ) -> Result<Gc<DataCell>, VMError> {
+    let mut list: VecDeque<Gc<DataCell>> = VecDeque::new();
+    let mut dotted = false;
+  
+    loop {
+      match lexemes.peek() {
+        None => {
+          return Err(VMError(Box::new(ParseError::MismatchedLParen), head_info));
+        },
+        Some(LexItem(Lexeme::Dot, _)) => {
+          dotted = true;
+          lexemes.next();
+        },
+        Some(LexItem(Lexeme::RParen, _)) => {
+          /* no longer ending lists with nil--assume its presence.
+           * this means that the dot lexeme is now meaningless,
+           * which is fine
+           *
+          // end list with nil (if it isn't already nil)
+          if !dotted && !list.is_empty() {
+            list.push_back(Gc::new(GcCell::new(Data::nil())));
+          }
+          */
+          lexemes.next();
+          return Ok(DataCell::new_info(Data::List(list), head_info));
+        },
+        _ => {
+          let next_data = self.parse_rec(lexemes)?;
+  
+          // check for end of list if dotted
+          if dotted {
+            if let Some(LexItem(lexeme, info)) = lexemes.peek() {
+              if *lexeme != Lexeme::RParen {
+                return Err(VMError(
+                  Box::new(ParseError::WronglyDottedList),
+                  info.clone(),
+                ));
+              }
             }
           }
-        }
-
-        list.push_back(next_data);
-      },
+  
+          list.push_back(next_data);
+        },
+      }
     }
   }
-}
-
-fn parse_rec<I: Iterator<Item = LexItem>>(
-  lexemes: &mut Peekable<I>,
-  symbols: &mut SymbolTable,
-) -> Result<Gc<DataCell>, VMError> {
-  let data = match lexemes.next() {
-    Some(LexItem(Lexeme::Dot, info)) => {
-      panic!("Illegal dot location {:?}", info)
-    },
-    Some(LexItem(Lexeme::Symbol(x), info)) => DataCell::new_info(x, info),
-    Some(LexItem(Lexeme::Boolean(x), info)) => {
-      DataCell::new_info(Data::Boolean(x), info)
-    },
-    Some(LexItem(Lexeme::String(x), info)) => {
-      DataCell::new_info(Data::String(x), info)
-    },
-    Some(LexItem(Lexeme::Integer(x), info)) => {
-      DataCell::new_info(Data::Integer(x), info)
-    },
-    Some(LexItem(Lexeme::Float(x), info)) => {
-      DataCell::new_info(Data::Real(x), info)
-    },
-    Some(LexItem(Lexeme::Rational(n, d), info)) => {
-      DataCell::new_info(Data::Rational(n, d), info)
-    },
-    Some(LexItem(Lexeme::Complex(r, i), info)) => {
-      DataCell::new_info(Data::Complex(r, i), info)
-    },
-
-    Some(LexItem(Lexeme::LParen, info)) => parse_list(lexemes, symbols, info)?,
-    Some(LexItem(Lexeme::RParen, info)) => {
-      return Err(VMError(Box::new(ParseError::MismatchedRParen), info));
-    },
-    Some(LexItem(Lexeme::Quote, info)) => {
-      if let Some(LexItem(Lexeme::RParen, info)) = lexemes.peek() {
-        return Err(VMError(Box::new(ParseError::QuotedRParen), info.clone()));
-      }
-      DataCell::new_info(
-        Data::List(
-          [
-            DataCell::new_info(symbols.add("quote"), info.clone()),
-            parse_rec(lexemes, symbols)?,
-            // no longer ending lists with nil
-            //Gc::new(GcCell::new(Data::nil())),
-          ]
-          .into(),
-        ),
-        info,
-      )
-    },
-
-    None => panic!("Tried to parse nothing"),
-  };
-
-  Ok(data)
+  
+  fn parse_rec<I: Iterator<Item = LexItem>>(
+    &mut self,
+    lexemes: &mut Peekable<I>,
+  ) -> Result<Gc<DataCell>, VMError> {
+    let data = match lexemes.next() {
+      Some(LexItem(Lexeme::Dot, info)) => {
+        panic!("Illegal dot location {:?}", info)
+      },
+      Some(LexItem(Lexeme::Symbol(x), info)) => DataCell::new_info(x, info),
+      Some(LexItem(Lexeme::Boolean(x), info)) => {
+        DataCell::new_info(Data::Boolean(x), info)
+      },
+      Some(LexItem(Lexeme::String(x), info)) => {
+        DataCell::new_info(Data::String(x), info)
+      },
+      Some(LexItem(Lexeme::Integer(x), info)) => {
+        DataCell::new_info(Data::Integer(x), info)
+      },
+      Some(LexItem(Lexeme::Float(x), info)) => {
+        DataCell::new_info(Data::Real(x), info)
+      },
+      Some(LexItem(Lexeme::Rational(n, d), info)) => {
+        // reduce rational
+        let gcf = self.gcf(n.abs() as u64, d);
+        let (rn, rd) = (n / gcf as i64, d / gcf);
+        DataCell::new_info(Data::Rational(rn, rd), info)
+      },
+      Some(LexItem(Lexeme::Complex(r, i), info)) => {
+        DataCell::new_info(Data::Complex(r, i), info)
+      },
+  
+      Some(LexItem(Lexeme::LParen, info)) => self.parse_list(lexemes, info)?,
+      Some(LexItem(Lexeme::RParen, info)) => {
+        return Err(VMError(Box::new(ParseError::MismatchedRParen), info));
+      },
+      Some(LexItem(Lexeme::Quote, info)) => {
+        if let Some(LexItem(Lexeme::RParen, info)) = lexemes.peek() {
+          return Err(VMError(Box::new(ParseError::QuotedRParen), info.clone()));
+        }
+        DataCell::new_info(
+          Data::List(
+            [
+              DataCell::new_info(self.symbols.add("quote"), info.clone()),
+              self.parse_rec(lexemes)?,
+              // no longer ending lists with nil
+              //Gc::new(GcCell::new(Data::nil())),
+            ]
+            .into(),
+          ),
+          info,
+        )
+      },
+  
+      None => panic!("Tried to parse nothing"),
+    };
+  
+    Ok(data)
+  }
 }
 
 #[cfg(test)]
