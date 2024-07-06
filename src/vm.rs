@@ -5,7 +5,6 @@ use crate::{
   util::LRU,
 };
 use gc::Gc;
-use log::*;
 use prime_factorization::Factorization;
 use std::{
   cell::{RefCell, UnsafeCell},
@@ -20,7 +19,7 @@ use std::{
 
 #[derive(Debug)]
 pub struct VM {
-  builtins: HashMap<Rc<str>, Rc<dyn BuiltinFn>>,
+  pub global_env: Rc<Env>,
   pub symbols: SymbolTable,
   factors_memo: UnsafeCell<HashMap<u64, Vec<u64>>>,
   factors_eviction_queue: RefCell<LRU<u64>>,
@@ -29,32 +28,46 @@ pub struct VM {
 impl VM {
   const MEMO_SZ: usize = 10_000;
 
-  pub fn new() -> Self {
+  pub fn no_std() -> Self {
     Self {
-      builtins: HashMap::new(),
+      global_env: Rc::new(Env::new()),
       symbols: SymbolTable::new(),
       factors_memo: UnsafeCell::new(HashMap::with_capacity(Self::MEMO_SZ)),
       factors_eviction_queue: RefCell::new(LRU::with_capacity(Self::MEMO_SZ)),
     }
   }
 
+  pub fn new() -> Self {
+    let mut me = Self::no_std();
+    stdlib::import_std(&mut me);
+    me
+  }
+
   pub fn def_builtin<F: BuiltinFn + 'static, S: AsRef<str>>(
     &mut self,
     name: S,
+    parameters: usize,
     code: F,
   ) {
+    // create/retrieve symbol
     let sym = self.symbols.add(name);
-    if let Data::Symbol(ref name) = sym {
-      let replaced = self.builtins.insert(Rc::clone(name), Rc::new(code));
-      if replaced.is_some() {
-        error!(
-          "Redefined {}, a builtin function. You probably don't want to do this.",
-          name
-        );
-      }
-    } else {
+    let Data::Symbol(ref name) = sym else {
       unreachable!();
-    }
+    };
+
+    // register builtin
+    self.global_env.bind(
+      name,
+      DataCell::new_info(
+        Data::Builtin {
+          name: Rc::clone(name),
+          parameters,
+          arguments: Vec::new(),
+          code: Rc::new(code),
+        },
+        SourceInfo::blank(),
+      ),
+    );
   }
 
   // SAFETY: the factors_memo pointer is only used in this function, so
@@ -199,6 +212,20 @@ impl VM {
     .unwrap();
   }
 
+  pub fn eval_str<S: AsRef<str>>(
+    &mut self,
+    source: S,
+  ) -> Result<Gc<DataCell>, VMError> {
+    let source = source.as_ref().chars();
+    let lexemes = self.lex(source)?;
+    let asts = self.build_ast(lexemes).unwrap();
+    asts
+      .into_iter()
+      .map(|ast| self.eval(&Rc::clone(&self.global_env), ast))
+      .reduce(|a, data| a.and(data))
+      .unwrap()
+  }
+
   pub fn eval(
     &mut self,
     env: &Rc<Env>,
@@ -218,17 +245,18 @@ impl VM {
       | Procedure { .. } => Ok(Gc::clone(&expr)),
 
       // variable lookup
-      Symbol(ref name) => env
-        .lookup(name)
-        .ok_or(VMError::new(EvalError::UnboundSymbol, expr.info.clone())),
+      Symbol(ref name) => env.lookup(name).ok_or(VMError::new(
+        EvalError::UnboundSymbol(Rc::clone(name)),
+        expr.info.clone(),
+      )),
 
       // function application & special forms
       List(ref exps) => match exps.front().as_ref() {
         None => Err(VMError::new(
-          EvalError::NonFunctionApplication,
+          EvalError::EmptyListEvaluation,
           expr.info.clone(),
         )),
-        Some(gcdata) => match *gcdata.borrow() {
+        Some(head) => match *head.borrow() {
           ///////////////////
           // special forms //
           ///////////////////
@@ -244,13 +272,13 @@ impl VM {
               } else {
                 return Err(VMError::new(
                   EvalError::InvalidLambdaName,
-                  gcdata.info.clone(),
+                  head.info.clone(),
                 ));
               }
             } else {
               return Err(VMError::new(
                 EvalError::InvalidSpecialForm,
-                gcdata.info.clone(),
+                head.info.clone(),
               ));
             };
 
@@ -264,14 +292,14 @@ impl VM {
                 } else {
                   return Err(VMError::new(
                     EvalError::InvalidParameter,
-                    gcdata.info.clone(),
+                    head.info.clone(),
                   ));
                 }
               }
             } else {
               return Err(VMError::new(
                 EvalError::InvalidParameterList,
-                gcdata.info.clone(),
+                head.info.clone(),
               ));
             }
 
@@ -283,14 +311,14 @@ impl VM {
               code: Gc::clone(&exps[2]),
             };
 
-            Ok(DataCell::new_info(proc, gcdata.info.clone()))
+            Ok(DataCell::new_info(proc, head.info.clone()))
           },
 
           Symbol(ref s) if *s == "quote".into() => {
             if exps.len() != 2 {
               Err(VMError::new(
                 EvalError::InvalidSpecialForm,
-                gcdata.info.clone(),
+                head.info.clone(),
               ))
             } else {
               Ok(Gc::clone(&exps[1]))
@@ -301,15 +329,15 @@ impl VM {
             if exps.len() != 3 {
               Err(VMError::new(
                 EvalError::InvalidSpecialForm,
-                gcdata.info.clone(),
+                head.info.clone(),
               ))
             } else if let Symbol(ref s) = &*exps[1].borrow() {
               env.bind(s, self.eval(env, Gc::clone(&exps[2]))?);
-              Ok(DataCell::new_info(Data::nil(), gcdata.info.clone()))
+              Ok(DataCell::new_info(Data::nil(), head.info.clone()))
             } else {
               Err(VMError::new(
                 EvalError::InvalidSpecialForm,
-                gcdata.info.clone(),
+                head.info.clone(),
               ))
             }
           },
@@ -318,13 +346,16 @@ impl VM {
             if exps.len() != 2 {
               Err(VMError::new(
                 EvalError::InvalidSpecialForm,
-                gcdata.info.clone(),
+                head.info.clone(),
               ))
             } else {
               if env.set(s, &exps[1]) {
-                Ok(DataCell::new_info(Data::nil(), gcdata.info.clone()))
+                Ok(DataCell::new_info(Data::nil(), head.info.clone()))
               } else {
-                Err(VMError::new(EvalError::UnboundSymbol, gcdata.info.clone()))
+                Err(VMError::new(
+                  EvalError::UnboundSymbol(Rc::clone(s)),
+                  head.info.clone(),
+                ))
               }
             }
           },
@@ -333,7 +364,7 @@ impl VM {
             if exps.len() != 4 {
               Err(VMError::new(
                 EvalError::InvalidSpecialForm,
-                gcdata.info.clone(),
+                head.info.clone(),
               ))
             } else {
               // evaluate condition
@@ -342,7 +373,7 @@ impl VM {
                 Boolean(false) => self.eval(env, Gc::clone(&exps[3])),
                 _ => Err(VMError::new(
                   EvalError::NonBooleanTest,
-                  gcdata.info.clone(),
+                  head.info.clone(),
                 )),
               }
             }
@@ -352,7 +383,7 @@ impl VM {
             if exps.len() != 2 {
               Err(VMError::new(
                 EvalError::InvalidSpecialForm,
-                gcdata.info.clone(),
+                head.info.clone(),
               ))
             } else {
               if let String(s) = &*exps[1].borrow() {
@@ -363,13 +394,12 @@ impl VM {
                     Ok(_) => Ok(()),
                     Err(e) => Err(VMError::new(
                       EvalError::IOError(e),
-                      gcdata.info.clone(),
+                      head.info.clone(),
                     )),
                   },
-                  Err(e) => Err(VMError::new(
-                    EvalError::IOError(e),
-                    gcdata.info.clone(),
-                  )),
+                  Err(e) => {
+                    Err(VMError::new(EvalError::IOError(e), head.info.clone()))
+                  },
                 }?;
 
                 // lex and parse file
@@ -377,7 +407,7 @@ impl VM {
                 let codes = self.build_ast(lexemes)?;
 
                 let mut evaluated =
-                  DataCell::new_info(Data::nil(), gcdata.info.clone());
+                  DataCell::new_info(Data::nil(), head.info.clone());
                 for code in codes {
                   evaluated = self.eval(env, code)?;
                 }
@@ -386,56 +416,63 @@ impl VM {
               } else {
                 Err(VMError::new(
                   EvalError::InvalidSpecialForm,
-                  gcdata.info.clone(),
+                  head.info.clone(),
                 ))
               }
             }
           },
 
-          // procedure call
-          Procedure {
-            ref name,
-            ref parameters,
-            ref arguments,
-            ref code,
-          } => {
-            let given_args_len = exps.len() - 1;
-            self.apply(
-              env,
-              name,
-              gcdata.info.clone(),
-              parameters,
-              arguments,
-              exps.iter().skip(1).cloned(),
-              given_args_len,
-              code,
-            )
+          // function application
+          _ => {
+            let headval = self.eval(env, Gc::clone(*head))?;
+            let res = match *headval.borrow() {
+              // procedure call
+              Procedure {
+                ref name,
+                ref parameters,
+                ref arguments,
+                ref code,
+              } => {
+                let given_args_len = exps.len() - 1;
+                self.apply(
+                  &env,
+                  name,
+                  head.info.clone(),
+                  parameters,
+                  arguments,
+                  exps.iter().skip(1).cloned(),
+                  given_args_len,
+                  code,
+                )
+              },
+
+              // builtin call
+              Builtin {
+                ref name,
+                parameters,
+                ref arguments,
+                ref code,
+              } => {
+                let given_args_len = exps.len() - 1;
+
+                self.apply_builtin(
+                  name,
+                  head.info.clone(),
+                  parameters,
+                  arguments,
+                  exps.iter().skip(1).cloned(),
+                  given_args_len,
+                  code,
+                )
+              },
+
+              ref e => Err(VMError::new(
+                EvalError::NonFunctionApplication(e.clone()),
+                head.info.clone(),
+              )),
+            };
+            res
           },
-
-          // builtin call
-          Builtin {
-            ref name,
-            parameters,
-            ref arguments,
-            ref code,
-          } => {
-            let given_args_len = exps.len() - 1;
-
-            self.apply_builtin(
-              name,
-              gcdata.info.clone(),
-              parameters,
-              arguments,
-              exps.iter().skip(1).cloned(),
-              given_args_len,
-              code,
-            )
-          },
-
-          _ => Err(VMError::new(
-            EvalError::NonFunctionApplication,
-            gcdata.info.clone(),
-          )),
         },
       },
     }
@@ -557,14 +594,6 @@ impl VM {
   }
 }
 
-impl Default for VM {
-  fn default() -> Self {
-    let mut me = VM::new();
-    stdlib::import_std(&mut me);
-    me
-  }
-}
-
 #[cfg(test)]
 mod tests {
   use crate::{
@@ -578,7 +607,7 @@ mod tests {
   fn display_data() {
     use Data::*;
 
-    let mut vm = VM::new();
+    let mut vm = VM::no_std();
 
     let symbol = vm.symbols.add("jeremy");
     assert_eq!(vm.display_data(&symbol), "jeremy".to_owned());
@@ -624,7 +653,7 @@ mod tests {
   fn display_numbers() {
     use Data::*;
 
-    let mut vm = VM::new();
+    let mut vm = VM::no_std();
 
     let complex = Complex(123.4, 5.0);
     assert_eq!(vm.display_data(&complex), "123.4+5i");
@@ -650,7 +679,7 @@ mod tests {
 
   #[test]
   fn factorize() {
-    let vm = VM::new();
+    let vm = VM::no_std();
 
     let f200 = vm.factorize(200);
     assert_eq!(f200, &[2, 2, 2, 5, 5]);
@@ -667,7 +696,7 @@ mod tests {
 
   #[test]
   fn gcf() {
-    let mut vm = VM::new();
+    let mut vm = VM::no_std();
 
     let g5 = vm.gcf(5, 15);
     assert_eq!(g5, 5);
