@@ -267,9 +267,10 @@ impl VM {
               scratch_pad.push(c);
               state = State::decimal();
             },
-            _ => {
+            c => {
               negative = false;
               scratch_pad.push('-');
+              scratch_pad.push(c);
               state = State::BoolOrIdent;
             },
           }
@@ -606,6 +607,12 @@ mod tests {
     let expected_dashed =
       vec![Lexeme::Symbol(vm.symbols.get("my-symbol").unwrap())];
     assert_eq!(expected_dashed, actual_dashed);
+
+    let actual_start_dashed = lex_str!(vm, "-Inf");
+    println!("{:?}", actual_start_dashed);
+    let expected_start_dashed =
+      vec![Lexeme::Symbol(vm.symbols.get("-Inf").unwrap())];
+    assert_eq!(expected_start_dashed, actual_start_dashed);
 
     // should these produce an error?
     let actual_fake_true = lex_str!(vm, "#tr");

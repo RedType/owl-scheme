@@ -140,21 +140,22 @@ impl VM {
 
         write!(f, "(").unwrap();
         while let Some(x) = iter.next() {
-          let last = iter.peek().is_none();
+          //let last = iter.peek().is_none();
           // write leading space
           if first {
             first = false;
-          } else if !last {
+          } else {
             write!(f, " ").unwrap();
           }
 
+          self.display_data_rec(f, &x.data);
+          /* no longer using nil to end lists
           // check to see if we're at the end
           // if so, print a dot for non-nil and print nothing for nil
           // otherwise just print the element
           if !last {
             self.display_data_rec(f, &x.data);
           }
-          /* no longer using nil to end lists
           else if !x.data.is_nil() {
             write!(f, " . ").unwrap();
             self.display_data_rec(f, &x.data);
@@ -468,6 +469,7 @@ impl VM {
                 let given_args_len = exps.len() - 1;
 
                 self.apply_builtin(
+                  env,
                   name,
                   head.info.clone(),
                   parameters,
@@ -537,10 +539,12 @@ impl VM {
       let full_arguments = preapplied_arguments
         .iter()
         .cloned()
-        .chain(given_arguments.into_iter());
+        .chain(given_arguments.into_iter())
+        .map(|arg| self.eval(env, arg));
+
       let binds = parameters.iter().zip(full_arguments);
       for (p, a) in binds {
-        new_env.bind(p, a);
+        new_env.bind(p, a?);
       }
 
       // evaluate and return
@@ -553,6 +557,7 @@ impl VM {
 
   pub fn apply_builtin<I: IntoIterator<Item = Gc<DataCell>>>(
     &mut self,
+    env: &Rc<Env>,
     name: &Rc<str>,
     info: SourceInfo,
     parameters: usize,
@@ -593,10 +598,15 @@ impl VM {
         .iter()
         .cloned()
         .chain(given_arguments.into_iter())
-        .collect::<Vec<_>>();
+        .map(|arg| self.eval(env, arg));
+
+      let mut collected_arguments = Vec::new();
+      for arg in full_arguments {
+        collected_arguments.push(arg?);
+      }
 
       // evaluate and return
-      code(&full_arguments)
+      code(&collected_arguments)
         .map(|data| DataCell::new_info(data, info.clone()))
         .map_err(|err| VMError(err, info.clone()))
     } else {
@@ -664,7 +674,8 @@ mod tests {
       .map(|e| DataCell::new_info(e, SourceInfo::blank()))
       .collect::<VecDeque<_>>(),
     ));
-    assert_eq!(vm.display_data(&dotted), "(12 \"oy\" () . 0.23456)");
+    // no longer printing dots
+    assert_eq!(vm.display_data(&dotted), "(12 \"oy\" () 0.23456)");
   }
 
   #[test]

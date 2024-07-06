@@ -109,7 +109,7 @@ impl fmt::Display for ParseError {
 
 #[derive(Debug, Error)]
 pub enum ArithmeticError {
-  NonNumericArgument,
+  NonNumericArgument(Data),
 }
 
 impl fmt::Display for ArithmeticError {
@@ -117,8 +117,8 @@ impl fmt::Display for ArithmeticError {
     use ArithmeticError::*;
 
     match *self {
-      NonNumericArgument => {
-        write!(f, "non-numeric data given where a number was expected")
+      NonNumericArgument(ref arg) => {
+        write!(f, "{:?} given where a number was expected", arg)
       },
     }
   }

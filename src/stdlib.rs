@@ -1,6 +1,6 @@
 use crate::{
   data::{Data, DataCell},
-  error::UnspecifiedError,
+  error::{ArithmeticError, UnspecifiedError},
   vm::VM,
 };
 use std::f64::consts;
@@ -164,39 +164,41 @@ pub fn import_std(vm: &mut VM) {
   });
 
   vm.def_builtin("+", 2, |xs| {
-    let res = xs.iter().fold(Integer(0), |a, x| match (a, &x.data) {
-      (Integer(l), &Integer(r)) => Integer(l + r),
-      (Integer(i), &Rational(n, d)) | (Rational(n, d), &Integer(i)) => {
-        Rational(i * d as i64 + n, d)
+    xs.iter().fold(Ok(Integer(0)), |a, x| match (a, &x.data) {
+      (Ok(Integer(l)), &Integer(r)) => Ok(Integer(l + r)),
+      (Ok(Integer(i)), &Rational(n, d)) | (Ok(Rational(n, d)), &Integer(i)) => {
+        Ok(Rational(i * d as i64 + n, d))
       },
-      (Integer(i), &Real(r)) | (Real(r), &Integer(i)) => Real(r + i as f64),
-      (Integer(n), &Complex(r, i)) | (Complex(r, i), &Integer(n)) => {
-        Complex(r + n as f64, i)
+      (Ok(Integer(i)), &Real(r)) | (Ok(Real(r)), &Integer(i)) => {
+        Ok(Real(r + i as f64))
       },
-      (Rational(ln, ld), &Rational(rn, rd)) => {
+      (Ok(Integer(n)), &Complex(r, i)) | (Ok(Complex(r, i)), &Integer(n)) => {
+        Ok(Complex(r + n as f64, i))
+      },
+      (Ok(Rational(ln, ld)), &Rational(rn, rd)) => {
         let n = ln * rd as i64 + rn * ld as i64;
         let d = ld * rd;
-        Rational(n, d)
+        Ok(Rational(n, d))
       },
-      (Rational(n, d), &Real(r)) | (Real(r), &Rational(n, d)) => {
-        Real((n as f64 / d as f64) + r)
+      (Ok(Rational(n, d)), &Real(r)) | (Ok(Real(r)), &Rational(n, d)) => {
+        Ok(Real((n as f64 / d as f64) + r))
       },
-      (Rational(n, d), &Complex(r, i)) | (Complex(r, i), &Rational(n, d)) => {
-        Complex(n as f64 / d as f64 + r, i)
+      (Ok(Rational(n, d)), &Complex(r, i))
+      | (Ok(Complex(r, i)), &Rational(n, d)) => {
+        Ok(Complex(n as f64 / d as f64 + r, i))
       },
-      (Real(l), &Real(r)) => Real(l + r),
-      (Real(n), &Complex(r, i)) | (Complex(r, i), &Real(n)) => {
-        Complex(n + r, i)
+      (Ok(Real(l)), &Real(r)) => Ok(Real(l + r)),
+      (Ok(Real(n)), &Complex(r, i)) | (Ok(Complex(r, i)), &Real(n)) => {
+        Ok(Complex(n + r, i))
       },
-      (Complex(lr, li), &Complex(rr, ri)) => Complex(lr + rr, li + ri),
+      (Ok(Complex(lr, li)), &Complex(rr, ri)) => Ok(Complex(lr + rr, li + ri)),
 
-      _ => Data::nil(),
-    });
-    if res.is_nil() {
-      Err(Box::new(UnspecifiedError))
-    } else {
-      Ok(res)
-    }
+      (Err(l), _) => Err(l),
+
+      (Ok(_), r) => {
+        Err(Box::new(ArithmeticError::NonNumericArgument(r.clone())))
+      },
+    })
   });
 
   vm.def_builtin("*", 2, |xs| {

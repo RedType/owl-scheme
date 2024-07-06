@@ -83,7 +83,7 @@ impl Data {
       Self::Real(r) => Ok(Self::Real(r)),
       Self::Rational(n, d) => Ok(Self::Rational(n, d)),
       Self::Complex(r, i) => Ok(Self::Complex(r, i)),
-      _ => Err(ArithmeticError::NonNumericArgument),
+      _ => Err(ArithmeticError::NonNumericArgument(self.clone())),
     }
   }
 }
@@ -115,8 +115,10 @@ impl PartialEq for Data {
         ln * *rd as i64 == rn * *ld as i64
       },
       (Integer(l), Integer(r)) => l == r,
-      (Complex(_, _), Complex(_, _)) => unimplemented!(),
-      (Real(_), Real(_)) => unimplemented!(),
+      (Complex(lr, li), Complex(rr, ri)) => {
+        (lr - rr).abs() < 0.0000001 && (li - ri).abs() < 0.0000001
+      },
+      (Real(l), Real(r)) => (l - r).abs() < 0.0000001,
       _ => false,
     }
   }
