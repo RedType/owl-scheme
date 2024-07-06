@@ -98,6 +98,12 @@ fn parse_rec<I: Iterator<Item = LexItem>>(
     Some(LexItem(Lexeme::Float(x), info)) => {
       DataCell::new_info(Data::Real(x), info)
     },
+    Some(LexItem(Lexeme::Rational(n, d), info)) => {
+      DataCell::new_info(Data::Rational(n, d), info)
+    },
+    Some(LexItem(Lexeme::Complex(r, i), info)) => {
+      DataCell::new_info(Data::Complex(r, i), info)
+    },
 
     Some(LexItem(Lexeme::LParen, info)) => parse_list(lexemes, symbols, info)?,
     Some(LexItem(Lexeme::RParen, info)) => {
@@ -154,14 +160,14 @@ mod tests {
 
   #[test]
   fn parse_empty() {
-    let mut vm = VM::new();
+    let mut vm = VM::no_std();
     let result = vm.build_ast([]);
     assert!(result.unwrap().is_empty());
   }
 
   #[test]
   fn parse_empty_list() {
-    let mut vm = VM::new();
+    let mut vm = VM::no_std();
     let actual = parse_str!(vm, "()()");
     let expected = vec![Data::nil(), Data::nil()];
     assert_eq!(expected, actual);
@@ -169,7 +175,7 @@ mod tests {
 
   #[test]
   fn parse_funny_list() {
-    let mut vm = VM::new();
+    let mut vm = VM::no_std();
     let actual = parse_str!(vm, "(())");
     let expected = vec![l![Data::nil() /*Data::nil()*/,]];
     assert_eq!(expected, actual);
@@ -177,7 +183,7 @@ mod tests {
 
   #[test]
   fn parse_list() {
-    let mut vm = VM::new();
+    let mut vm = VM::no_std();
     let actual = parse_str!(vm, "(a b c d)");
     let expected = vec![l![
       vm.symbols.get("a").unwrap(),
@@ -191,7 +197,7 @@ mod tests {
 
   #[test]
   fn parse_lists() {
-    let mut vm = VM::new();
+    let mut vm = VM::no_std();
     let actual = parse_str!(vm, "(a)(b) 5 (c d)");
     let expected = vec![
       l![vm.symbols.get("a").unwrap() /*Data::nil()*/,],
@@ -208,7 +214,7 @@ mod tests {
 
   #[test]
   fn parse_deep_list() {
-    let mut vm = VM::new();
+    let mut vm = VM::no_std();
     let actual = parse_str!(vm, "(a (b c) . d)");
     let expected = vec![l![
       vm.symbols.get("a").unwrap(),
@@ -224,7 +230,7 @@ mod tests {
 
   #[test]
   fn quote() {
-    let mut vm = VM::new();
+    let mut vm = VM::no_std();
     let actual = parse_str!(vm, "(a 'b '('c d))");
     let expected = vec![l![
       vm.symbols.get("a").unwrap(),
@@ -253,7 +259,7 @@ mod tests {
 
   #[test]
   fn err_mismatched_l_paren() {
-    let mut vm = VM::new();
+    let mut vm = VM::no_std();
     let lexemes = vm.lex("(a 'b '('c d)".chars()).unwrap();
     let result = vm.build_ast(lexemes).unwrap_err();
     assert_eq!(
@@ -264,7 +270,7 @@ mod tests {
 
   #[test]
   fn err_mismatched_r_paren() {
-    let mut vm = VM::new();
+    let mut vm = VM::no_std();
     let lexemes = vm.lex("(a 'b '()'c d))".chars()).unwrap();
     let result = vm.build_ast(lexemes).unwrap_err();
     assert_eq!(
@@ -275,7 +281,7 @@ mod tests {
 
   #[test]
   fn err_quoted_r_paren() {
-    let mut vm = VM::new();
+    let mut vm = VM::no_std();
     let lexemes = vm.lex("(a 'b (')'c d)".chars()).unwrap();
     let result = vm.build_ast(lexemes).unwrap_err();
     assert_eq!(
@@ -286,7 +292,7 @@ mod tests {
 
   #[test]
   fn err_wrongly_dotted_list() {
-    let mut vm = VM::new();
+    let mut vm = VM::no_std();
     let lexemes = vm.lex("(a . b c)".chars()).unwrap();
     let result = vm.build_ast(lexemes).unwrap_err();
     assert_eq!(

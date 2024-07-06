@@ -17,6 +17,8 @@ pub enum Lexeme {
   String(String),
   Integer(i64),
   Float(f64),
+  Complex(f64, f64),
+  Rational(i64, u64),
 }
 
 impl PartialEq for Lexeme {
@@ -31,7 +33,13 @@ impl PartialEq for Lexeme {
       (Boolean(l), Boolean(r)) => l == r,
       (String(l), String(r)) => l == r,
       (Integer(l), Integer(r)) => l == r,
-      (Float(l), Float(r)) => l == r,
+      (Float(l), Float(r)) => (l - r).abs() < 0.0000001,
+      (Rational(ln, ld), Rational(rn, rd)) => {
+        *ln * *rd as i64 == *rn * *ld as i64
+      },
+      (Complex(lr, li), Complex(rr, ri)) => {
+        (lr - rr).abs() < 0.0000001 && (li - ri).abs() < 0.0000001
+      },
       _ => false,
     }
   }
@@ -51,8 +59,26 @@ enum State {
   ZeroPrefixNumeric, // for non-decimal literals
   FloatOrDotIdent,
   Hexadecimal,
-  Decimal,
+  Decimal {
+    complex: bool,
+    real_part: f64,
+    complex_complete: bool,
+    rational: bool,
+    numerator: i64,
+  },
   Binary,
+}
+
+impl State {
+  fn decimal() -> Self {
+    Self::Decimal {
+      complex: false,
+      real_part: 0.0,
+      complex_complete: false,
+      rational: false,
+      numerator: 0,
+    }
+  }
 }
 
 impl VM {
@@ -118,7 +144,10 @@ impl VM {
       // reset line info when ch is not consumed
       macro_rules! unshift {
         () => {
-          shifted = true;
+          #[allow(unused_assignments)]
+          {
+            shifted = true;
+          }
           line = prev_line;
           col = prev_col;
           boundary_col = prev_boundary_col;
@@ -170,13 +199,15 @@ impl VM {
             },
             c if c.is_whitespace() => {},
             c if c.is_digit(10) => {
-              state = State::Decimal;
+              state = State::decimal();
               scratch_pad.push(c);
             },
-            c if c.is_control() => return err!(LexError::IllegalCharacter(c)),
-            c => {
+            c if is_identifier_char(c) => {
               state = State::BoolOrIdent;
               scratch_pad.push(c);
+            },
+            c => {
+              return err!(LexError::IllegalCharacter(c));
             },
           }
 
@@ -193,7 +224,7 @@ impl VM {
         },
 
         State::BoolOrIdent => {
-          if ch.is_alphanumeric() {
+          if is_identifier_char(ch) {
             scratch_pad.push(ch);
             shift!();
           } else {
@@ -234,7 +265,7 @@ impl VM {
             c if c.is_numeric() => {
               negative = true;
               scratch_pad.push(c);
-              state = State::Decimal;
+              state = State::decimal();
             },
             _ => {
               negative = false;
@@ -252,11 +283,26 @@ impl VM {
             'b' => state = State::Binary,
             '.' => {
               scratch_pad.push_str("0.");
-              state = State::Decimal;
+              state = State::decimal();
             },
+            'i' => {
+              push_lex!(Lexeme::Complex(0.0, 0.0));
+              negative = false;
+              state = State::Start;
+            },
+            '/' => {
+              negative = false;
+              state = State::Decimal {
+                complex: false,
+                real_part: 0.0,
+                complex_complete: false,
+                rational: true,
+                numerator: 0,
+              };
+            }
             c if c.is_numeric() => {
               scratch_pad.push(c);
-              state = State::Decimal;
+              state = State::decimal();
             },
             c if c.is_alphabetic() => return err!(LexError::InvalidNumber),
             _ => {
@@ -280,7 +326,7 @@ impl VM {
             },
             ch if ch.is_numeric() => {
               scratch_pad.push(ch);
-              State::Decimal
+              State::decimal()
             },
             ch => {
               scratch_pad.push(ch);
@@ -341,48 +387,102 @@ impl VM {
           shift!();
         },
 
-        State::Decimal => {
-          let mut do_conversion = false;
+        State::Decimal {
+          ref mut complex,
+          ref mut real_part,
+          ref mut complex_complete,
+          ref mut rational,
+          ref mut numerator,
+        } => {
+          let conv_int = || {
+            i64::from_str_radix(&scratch_pad, 10)
+              .map(|n| if negative { -1 } else { 1 } * n)
+              .or_else(|_| err!(LexError::InvalidNumber))
+          };
+
+          let conv_float = || {
+            f64::from_str(&scratch_pad)
+              .map(|n| if negative { -1.0 } else { 1.0 } * n)
+              .or_else(|_| err!(LexError::InvalidNumber))
+          };
+
           match ch {
             '_' => (),
             '.' => scratch_pad.push('.'),
-            '(' | ')' => do_conversion = true,
-            c if c.is_whitespace() => do_conversion = true,
+            c @ '+' | c @ '-' => {
+              if *complex {
+                return err!(LexError::MalformedComplex);
+              } else if *rational {
+                return err!(LexError::MalformedRational);
+              } else {
+                *complex = true;
+                *real_part = conv_float()?;
+                negative = c == '-';
+                scratch_pad = String::new();
+              }
+            },
+            '/' => {
+              if *complex {
+                return err!(LexError::MalformedComplex);
+              } else if *rational {
+                return err!(LexError::MalformedRational);
+              } else {
+                *rational = true;
+                *numerator = conv_int()?;
+                negative = false;
+                scratch_pad = String::new();
+              }
+            },
+            'i' => {
+              if !*complex_complete {
+                *complex = true;
+                *complex_complete = true;
+              } else {
+                return err!(LexError::NonDecCharInDec);
+              }
+            },
+            c if c.is_whitespace() || c == ')' => {
+              if *complex && !*complex_complete {
+                return err!(LexError::MalformedComplex);
+              } else if *complex {
+                let imag_part = conv_float()?;
+                push_lex!(Lexeme::Complex(*real_part, imag_part));
+              } else if *rational {
+                let denominator = conv_int()?;
+                push_lex!(Lexeme::Rational(*numerator, denominator as u64));
+              } else if let Ok(int) = conv_int() {
+                push_lex!(Lexeme::Integer(int));
+              } else {
+                let float = conv_float()?;
+                push_lex!(Lexeme::Float(float));
+              }
+
+              // reset state
+              negative = false;
+              scratch_pad = String::new();
+              state = State::Start;
+              unshift!();
+              continue;
+            },
             c if c.is_digit(10) => scratch_pad.push(c),
             _ => return err!(LexError::NonDecCharInDec),
           }
 
-          if do_conversion {
-            if scratch_pad.contains('.') {
-              // if there's a . then it's a float
-              if let Ok(n) = f64::from_str(&scratch_pad) {
-                let final_n = if negative { -1.0 } else { 1.0 } * n;
-                push_lex!(Lexeme::Float(final_n));
-              } else {
-                return err!(LexError::InvalidNumber);
-              }
-            } else {
-              // if there's no . then it's an integer
-              if let Ok(n) = i64::from_str_radix(&scratch_pad, 10) {
-                let final_n = if negative { -1 } else { 1 } * n;
-                push_lex!(Lexeme::Integer(final_n));
-              } else {
-                return err!(LexError::InvalidNumber);
-              }
-            }
-
-            negative = false;
-            scratch_pad = String::new();
-            state = State::Start;
-            unshift!();
-          } else {
-            shift!();
-          }
+          shift!();
         },
       }
     }
 
     Ok(items)
+  }
+}
+
+fn is_identifier_char(ch: char) -> bool {
+  match ch {
+    '\'' | '+' | '=' | '/' | '|' | ':' | '<' | '>' | ',' | '.' | '?' | '!'
+    | '@' | '#' | '$' | '%' | '^' | '&' | '*' | '_' => true,
+    ch if ch.is_alphanumeric() => true,
+    _ => false,
   }
 }
 
@@ -410,7 +510,7 @@ mod tests {
 
   #[test]
   fn empty_string_produces_no_lexemes() {
-    let mut vm = VM::new();
+    let mut vm = VM::no_std();
 
     let expected: Vec<Lexeme> = Vec::new();
     let actual = lex_str!(vm, "");
@@ -419,7 +519,7 @@ mod tests {
 
   #[test]
   fn lexeme_lparen() {
-    let mut vm = VM::new();
+    let mut vm = VM::no_std();
 
     let expected = vec![Lexeme::LParen];
     let actual = lex_str!(vm, "(");
@@ -432,7 +532,7 @@ mod tests {
 
   #[test]
   fn lexeme_rparen() {
-    let mut vm = VM::new();
+    let mut vm = VM::no_std();
 
     let expected = vec![Lexeme::RParen];
     let actual = lex_str!(vm, ")");
@@ -445,7 +545,7 @@ mod tests {
 
   #[test]
   fn lexeme_quote() {
-    let mut vm = VM::new();
+    let mut vm = VM::no_std();
 
     let expected = vec![Lexeme::Quote];
     let actual = lex_str!(vm, "'");
@@ -458,7 +558,7 @@ mod tests {
 
   #[test]
   fn lexeme_dot() {
-    let mut vm = VM::new();
+    let mut vm = VM::no_std();
 
     let expected = vec![Lexeme::Dot];
     let actual = lex_str!(vm, ".");
@@ -471,7 +571,7 @@ mod tests {
 
   #[test]
   fn lexeme_symbol() {
-    let mut vm = VM::new();
+    let mut vm = VM::no_std();
 
     let actual = lex_str!(vm, "test");
     let expected = vec![Lexeme::Symbol(vm.symbols.get("test").unwrap())];
@@ -498,6 +598,10 @@ mod tests {
       vec![Lexeme::Symbol(vm.symbols.get(":3").unwrap())];
     assert_eq!(expected_sym_with_number, actual_sym_with_number);
 
+    let actual_qmark = lex_str!(vm, "huh?");
+    let expected_qmark = vec![Lexeme::Symbol(vm.symbols.get("huh?").unwrap())];
+    assert_eq!(expected_qmark, actual_qmark);
+
     // should these produce an error?
     let actual_fake_true = lex_str!(vm, "#tr");
     let expected_fake_true =
@@ -507,7 +611,7 @@ mod tests {
 
   #[test]
   fn lexeme_string() {
-    let mut vm = VM::new();
+    let mut vm = VM::no_std();
 
     let expected = vec![Lexeme::String("test".into())];
     let actual = lex_str!(vm, "\"test\"");
@@ -520,7 +624,7 @@ mod tests {
 
   #[test]
   fn lexeme_boolean() {
-    let mut vm = VM::new();
+    let mut vm = VM::no_std();
 
     let expected_true = vec![Lexeme::Boolean(true)];
     let actual_true = lex_str!(vm, "#t");
@@ -539,7 +643,7 @@ mod tests {
 
   #[test]
   fn lexeme_integer_from_decimal() {
-    let mut vm = VM::new();
+    let mut vm = VM::no_std();
 
     let expected_int = vec![Lexeme::Integer(420)];
     let actual_int = lex_str!(vm, "420");
@@ -573,7 +677,7 @@ mod tests {
 
   #[test]
   fn lexeme_integer_from_hexadecimal() {
-    let mut vm = VM::new();
+    let mut vm = VM::no_std();
 
     let expected_hex = vec![Lexeme::Integer(255)];
     let actual_hex = lex_str!(vm, "0xff");
@@ -594,7 +698,7 @@ mod tests {
 
   #[test]
   fn lexeme_integer_from_binary() {
-    let mut vm = VM::new();
+    let mut vm = VM::no_std();
 
     let expected_bin = vec![Lexeme::Integer(6)];
     let actual_bin = lex_str!(vm, "0b0110");
@@ -615,7 +719,7 @@ mod tests {
 
   #[test]
   fn lexeme_float() {
-    let mut vm = VM::new();
+    let mut vm = VM::no_std();
 
     let expected_float = vec![Lexeme::Float(0.5)];
     let actual_float = lex_str!(vm, "0.5");
@@ -633,14 +737,48 @@ mod tests {
   }
 
   #[test]
-  fn list_of_everything() {
-    let mut vm = VM::new();
+  fn lexeme_rational() {
+    let mut vm = VM::no_std();
 
-    let actual_list = lex_str!(vm, "'(print #f \"hello!!\" 0xff . 10.)");
+    let expected_rat = vec![Lexeme::Rational(1, 5)];
+    let actual_rat = lex_str!(vm, "1/5");
+    assert_eq!(expected_rat, actual_rat);
+
+    let expected_zrat = vec![Lexeme::Rational(0, 10)];
+    let actual_zrat = lex_str!(vm, "0/10");
+    assert_eq!(expected_zrat, actual_zrat);
+
+    let expected_neg_rat = vec![Lexeme::Rational(-3, 10)];
+    let actual_neg_rat = lex_str!(vm, "-3/10");
+    assert_eq!(expected_neg_rat, actual_neg_rat);
+  }
+
+  #[test]
+  fn lexeme_complex() {
+    let mut vm = VM::no_std();
+
+    let expected_comp = vec![Lexeme::Complex(1.3, 5.5)];
+    let actual_comp = lex_str!(vm, "1.3+5.5i");
+    assert_eq!(expected_comp, actual_comp);
+
+    let expected_comp2 = vec![Lexeme::Complex(-1.3, -5.5)];
+    let actual_comp2 = lex_str!(vm, "-1.3-5.5i");
+    assert_eq!(expected_comp2, actual_comp2);
+
+    let expected_comp3 = vec![Lexeme::Complex(0.0, -5.5)];
+    let actual_comp3 = lex_str!(vm, "-5.5i");
+    assert_eq!(expected_comp3, actual_comp3);
+  }
+
+  #[test]
+  fn list_of_everything() {
+    let mut vm = VM::no_std();
+
+    let actual_list = lex_str!(vm, "'(print? #f \"hello!!\" 0xff . 10.)");
     let expected_list = vec![
       Lexeme::Quote,
       Lexeme::LParen,
-      Lexeme::Symbol(vm.symbols.get("print").unwrap()),
+      Lexeme::Symbol(vm.symbols.get("print?").unwrap()),
       Lexeme::Boolean(false),
       Lexeme::String("hello!!".into()),
       Lexeme::Integer(255),
@@ -653,7 +791,7 @@ mod tests {
 
   #[test]
   fn list_of_anything() {
-    let mut vm = VM::new();
+    let mut vm = VM::no_std();
 
     let expected_nil = vec![Lexeme::LParen, Lexeme::RParen];
     let actual_nil = lex_str!(vm, "()");
