@@ -1,5 +1,6 @@
+use crate::data::Data;
 use gc::{Finalize, Trace};
-use std::{error::Error, fmt, io};
+use std::{error::Error, fmt, io, rc::Rc};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -48,6 +49,8 @@ pub enum LexError {
   DotInNonDecimalNumeric,
   IllegalCharacter(char),
   InvalidNumber,
+  MalformedComplex,
+  MalformedRational,
   NonBinCharInBin,
   NonDecCharInDec,
   NonHexCharInHex,
@@ -63,6 +66,8 @@ impl fmt::Display for LexError {
       },
       IllegalCharacter(c) => write!(f, "\"{}\" is not allowed in source", c),
       InvalidNumber => write!(f, "invalid number"),
+      MalformedComplex => write!(f, "malformed complex number"),
+      MalformedRational => write!(f, "malformed rational number"),
       NonBinCharInBin => {
         write!(f, "non-binary (0-1) character in binary number")
       },
@@ -121,6 +126,7 @@ impl fmt::Display for ArithmeticError {
 
 #[derive(Debug, Error)]
 pub enum EvalError {
+  EmptyListEvaluation,
   InvalidSpecialForm,
   InvalidLambdaName,
   InvalidParameter,
@@ -128,9 +134,9 @@ pub enum EvalError {
   InvalidArgumentList,
   IOError(io::Error),
   NonBooleanTest,
-  NonFunctionApplication,
+  NonFunctionApplication(Data),
   TooManyArguments,
-  UnboundSymbol,
+  UnboundSymbol(Rc<str>),
 }
 
 impl fmt::Display for EvalError {
@@ -138,6 +144,7 @@ impl fmt::Display for EvalError {
     use EvalError::*;
 
     match *self {
+      EmptyListEvaluation => write!(f, "empty list is not evaluable"),
       InvalidSpecialForm => {
         write!(f, "incorrect number of arguments given for special form")
       },
@@ -151,12 +158,12 @@ impl fmt::Display for EvalError {
       },
       IOError(ref e) => write!(f, "{}", e),
       NonBooleanTest => write!(f, "non-boolean expression in conditional"),
-      NonFunctionApplication => {
+      NonFunctionApplication(_) => {
         write!(f, "non-function values cannot be applied")
       },
       TooManyArguments => write!(f, "too many arguments given"),
-      UnboundSymbol => {
-        write!(f, "attempted to evaluate or set an unbound symbol")
+      UnboundSymbol(ref name) => {
+        write!(f, "attempted to evaluate or set an unbound symbol {}", *name)
       },
     }
   }
