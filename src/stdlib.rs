@@ -314,7 +314,7 @@ mod tests {
     }
 
     {
-      let rational = vm.eval_str("(number? (/ 2 3))").unwrap();
+      let rational = vm.eval_str("(number? 2/3)").unwrap();
       assert_eq!(Data::Boolean(true), *rational.borrow());
     }
 
@@ -349,7 +349,7 @@ mod tests {
     }
 
     {
-      let rational = vm.eval_str("(complex? (/ 2 3))").unwrap();
+      let rational = vm.eval_str("(complex? 2/3)").unwrap();
       assert_eq!(Data::Boolean(true), *rational.borrow());
     }
 
@@ -389,7 +389,7 @@ mod tests {
     }
 
     {
-      let rational = vm.eval_str("(real? (/ 2 3))").unwrap();
+      let rational = vm.eval_str("(real? 2/3)").unwrap();
       assert_eq!(Data::Boolean(true), *rational.borrow());
     }
 
@@ -439,7 +439,7 @@ mod tests {
     }
 
     {
-      let rational = vm.eval_str("(rational? (/ 2 3))").unwrap();
+      let rational = vm.eval_str("(rational? 2/3)").unwrap();
       assert_eq!(Data::Boolean(true), *rational.borrow());
     }
 
@@ -489,12 +489,12 @@ mod tests {
     }
 
     {
-      let rational = vm.eval_str("(integer? (/ 2 3))").unwrap();
+      let rational = vm.eval_str("(integer? 2/3)").unwrap();
       assert_eq!(Data::Boolean(false), *rational.borrow());
     }
 
     {
-      let rational2 = vm.eval_str("(integer? (/ 2 1))").unwrap();
+      let rational2 = vm.eval_str("(integer? 4/2)").unwrap();
       assert_eq!(Data::Boolean(true), *rational2.borrow());
     }
 
@@ -529,7 +529,7 @@ mod tests {
     }
 
     {
-      let rational = vm.eval_str("(exact? (/ 2 3))").unwrap();
+      let rational = vm.eval_str("(exact? 2/3)").unwrap();
       assert_eq!(Data::Boolean(true), *rational.borrow());
     }
 
@@ -564,7 +564,7 @@ mod tests {
     }
 
     {
-      let rational = vm.eval_str("(inexact? (/ 2 3))").unwrap();
+      let rational = vm.eval_str("(inexact? 2/3)").unwrap();
       assert_eq!(Data::Boolean(false), *rational.borrow());
     }
 
@@ -599,12 +599,12 @@ mod tests {
     }
 
     {
-      let rational = vm.eval_str("(exact-integer? (/ 2 3))").unwrap();
+      let rational = vm.eval_str("(exact-integer? 2/3)").unwrap();
       assert_eq!(Data::Boolean(false), *rational.borrow());
     }
 
     {
-      let rational2 = vm.eval_str("(exact-integer? (/ 2 1))").unwrap();
+      let rational2 = vm.eval_str("(exact-integer? 3/1)").unwrap();
       assert_eq!(Data::Boolean(true), *rational2.borrow());
     }
 
@@ -649,7 +649,7 @@ mod tests {
     }
 
     {
-      let rational = vm.eval_str("(finite? (/ 2 3))").unwrap();
+      let rational = vm.eval_str("(finite? 2/3)").unwrap();
       assert_eq!(Data::Boolean(true), *rational.borrow());
     }
 
@@ -694,7 +694,7 @@ mod tests {
     }
 
     {
-      let rational = vm.eval_str("(infinite? (/ 2 3))").unwrap();
+      let rational = vm.eval_str("(infinite? 2/3)").unwrap();
       assert_eq!(Data::Boolean(false), *rational.borrow());
     }
 
@@ -724,7 +724,7 @@ mod tests {
     }
 
     {
-      let rational = vm.eval_str("(+ 5 (/ 10 2))").unwrap();
+      let rational = vm.eval_str("(+ 5 10/2)").unwrap();
       assert_eq!(Data::Rational(10, 1), *rational.borrow());
     }
 
