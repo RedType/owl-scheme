@@ -1,5 +1,4 @@
 use std::{rc::Rc, str::FromStr};
-
 use crate::{
   data::Data,
   error::{LexError, SourceInfo, VMError},
@@ -124,7 +123,7 @@ impl VM {
           col = 0;
           boundary_col = 0;
         },
-        c @ '(' | c @ ')' | c if c.is_whitespace() => {
+        c if is_boundary_char(c) => {
           col += 1;
           prev_boundary_col = boundary_col;
           boundary_col = col;
@@ -262,6 +261,10 @@ impl VM {
               negative = true;
               state = State::ZeroPrefixNumeric;
             },
+            c if is_boundary_char(c) => {
+              push_lex!(Lexeme::Symbol(self.symbols.add("-")));
+              state = State::Start;
+            },
             c if c.is_numeric() => {
               negative = true;
               scratch_pad.push(c);
@@ -320,7 +323,7 @@ impl VM {
 
         State::FloatOrDotIdent => {
           state = match ch {
-            ch @ '(' | ch @ ')' | ch if ch.is_whitespace() => {
+            ch if is_boundary_char(ch) => {
               scratch_pad = String::new();
               push_lex!(Lexeme::Dot);
               State::Start
@@ -342,7 +345,7 @@ impl VM {
           match ch {
             '.' => return err!(LexError::DotInNonDecimalNumeric),
             '_' => (),
-            c @ '(' | c @ ')' | c if c.is_whitespace() => {
+            ch if is_boundary_char(ch) => {
               if let Ok(n) = i64::from_str_radix(&scratch_pad, 16) {
                 let final_n = if negative { -1 } else { 1 } * n;
                 push_lex!(Lexeme::Integer(final_n));
@@ -367,7 +370,7 @@ impl VM {
           match ch {
             '.' => return err!(LexError::DotInNonDecimalNumeric),
             '_' => (),
-            c @ '(' | c @ ')' | c if c.is_whitespace() => {
+            ch if is_boundary_char(ch) => {
               if let Ok(n) = i64::from_str_radix(&scratch_pad, 2) {
                 let final_n = if negative { -1 } else { 1 } * n;
                 push_lex!(Lexeme::Integer(final_n));
@@ -442,7 +445,7 @@ impl VM {
                 return err!(LexError::NonDecCharInDec);
               }
             },
-            c if c.is_whitespace() || c == ')' => {
+            ch if is_boundary_char(ch) => {
               if *complex && !*complex_complete {
                 return err!(LexError::MalformedComplex);
               } else if *complex {
@@ -475,6 +478,14 @@ impl VM {
     }
 
     Ok(items)
+  }
+}
+
+fn is_boundary_char(ch: char) -> bool {
+  match ch {
+    '(' | ')' => true,
+    ch if ch.is_whitespace() => true,
+    _ => false,
   }
 }
 
@@ -602,6 +613,11 @@ mod tests {
     let actual_qmark = lex_str!(vm, "huh?");
     let expected_qmark = vec![Lexeme::Symbol(vm.symbols.get("huh?").unwrap())];
     assert_eq!(expected_qmark, actual_qmark);
+
+    let actual_dash = lex_str!(vm, "-");
+    let expected_dash =
+      vec![Lexeme::Symbol(vm.symbols.get("-").unwrap())];
+    assert_eq!(expected_dash, actual_dash);
 
     let actual_dashed = lex_str!(vm, "my-symbol");
     let expected_dashed =
