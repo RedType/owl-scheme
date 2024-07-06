@@ -8,22 +8,27 @@ Scheme language interpreter
 - [x] parser
   - [x] tests
   - [x] errors
-- [ ] eval & apply
-  - [ ] special forms
+- [x] eval & apply
+  - [x] special forms
     - [x] `lambda`
     - [x] `quote`
     - [x] `define`, `set!`
-    - [ ] `if`
-    - [ ] `include`
+    - [x] `if`
+    - [x] `include`
     - [ ] tests
-  - [ ] tests
-  - [ ] errors
+  - [x] tests
+  - [x] errors
 - [x] environments
-- [ ] standard procedures
+- [x] error reporting
 - [ ] continuations
 - [ ] tail recursion
 - [ ] standard library
-- [ ] numerical tower
+  - [x] queries (number? list? etc)
+  - [x] arithmetic
+  - [ ] fun functions
+  - [ ] file i/o
+  - [ ] std stream i/o
+- [x] numerical tower
   - [x] prime factorization
     - [x] LRU cache
 - [ ] repl
