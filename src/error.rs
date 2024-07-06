@@ -163,7 +163,11 @@ impl fmt::Display for EvalError {
       },
       TooManyArguments => write!(f, "too many arguments given"),
       UnboundSymbol(ref name) => {
-        write!(f, "attempted to evaluate or set an unbound symbol {}", *name)
+        write!(
+          f,
+          "attempted to evaluate or set an unbound symbol {}",
+          *name
+        )
       },
     }
   }

@@ -299,7 +299,7 @@ impl VM {
                 rational: true,
                 numerator: 0,
               };
-            }
+            },
             c if c.is_numeric() => {
               scratch_pad.push(c);
               state = State::decimal();
@@ -603,7 +603,8 @@ mod tests {
     assert_eq!(expected_qmark, actual_qmark);
 
     let actual_dashed = lex_str!(vm, "my-symbol");
-    let expected_dashed = vec![Lexeme::Symbol(vm.symbols.get("my-symbol").unwrap())];
+    let expected_dashed =
+      vec![Lexeme::Symbol(vm.symbols.get("my-symbol").unwrap())];
     assert_eq!(expected_dashed, actual_dashed);
 
     // should these produce an error?
