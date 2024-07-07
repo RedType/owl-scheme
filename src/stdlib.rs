@@ -310,7 +310,9 @@ pub fn import_std(vm: &mut VM) {
         (Ok(Integer(l)), &Integer(r)) => Ok(Real(l as f64 / r as f64)),
         (Ok(Integer(l)), &Real(r)) => Ok(Real(l as f64 / r)),
         (Ok(Integer(l)), &Rational(n, d)) => Ok(Rational(l * d as i64, n)),
-        (Ok(Integer(l)), &Complex(r, i)) => Ok(Complex(l as f64 / r, l as f64 / i)),
+        (Ok(Integer(l)), &Complex(r, i)) => {
+          Ok(Complex(l as f64 / r, l as f64 / i))
+        },
         (Ok(Real(l)), &Integer(r)) => Ok(Real(l / r as f64)),
         (Ok(Real(l)), &Real(r)) => Ok(Real(l / r)),
         (Ok(Real(l)), &Rational(n, d)) => Ok(Real(l / n as f64 * d as f64)),
@@ -325,7 +327,9 @@ pub fn import_std(vm: &mut VM) {
           Ok(Complex(rat / r, rat / i))
         },
 
-        (Ok(Complex(lr, i)), &Integer(r)) => Ok(Complex(lr / r as f64, i / r as f64)),
+        (Ok(Complex(lr, i)), &Integer(r)) => {
+          Ok(Complex(lr / r as f64, i / r as f64))
+        },
         (Ok(Complex(lr, i)), &Real(r)) => Ok(Complex(lr / r, i / r)),
         (Ok(Complex(lr, i)), &Rational(n, d)) => {
           let rat = n as f64 / d as f64;

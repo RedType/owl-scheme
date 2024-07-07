@@ -5,6 +5,7 @@ edition = "2021"
 authors = ["Will Young <wil.wyo@gmail.com>"]
 
 [dependencies]
+clap = { version = "4.5.8", features = ["derive"] }
 gc = { version = "^0.5", features = ["derive"] }
 log = "0.4.20"
 prime_factorization = "1.0.4"

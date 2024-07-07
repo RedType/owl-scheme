@@ -235,7 +235,7 @@ impl VM {
   ) -> Result<Gc<DataCell>, VMError> {
     let source = source.as_ref().chars();
     let lexemes = self.lex(source)?;
-    let asts = self.build_ast(lexemes).unwrap();
+    let asts = self.build_ast(lexemes)?;
     asts
       .into_iter()
       .map(|ast| self.eval(&Rc::clone(&self.global_env), ast))
@@ -525,8 +525,9 @@ impl VM {
     use Data::*;
 
     // check for partial application
-    let remaining =
-      parameters.len() - preapplied_arguments.len() - given_arguments_count;
+    let remaining = parameters.len() as isize
+      - preapplied_arguments.len() as isize
+      - given_arguments_count as isize;
 
     if remaining > 0 {
       // this is a partial application
@@ -588,8 +589,9 @@ impl VM {
     use Data::*;
 
     // check for partial application
-    let remaining =
-      parameters - preapplied_arguments.len() - given_arguments_count;
+    let remaining = parameters as isize
+      - preapplied_arguments.len() as isize
+      - given_arguments_count as isize;
 
     if remaining > 0 {
       // this is a partial application
@@ -605,7 +607,7 @@ impl VM {
 
       let new_partial = Builtin {
         name: new_proc_name,
-        parameters: remaining,
+        parameters: remaining as usize,
         arguments: full_arguments,
         code: Rc::clone(&code),
       };

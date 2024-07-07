@@ -1,9 +1,9 @@
-use std::{rc::Rc, str::FromStr};
 use crate::{
   data::Data,
   error::{LexError, SourceInfo, VMError},
   vm::VM,
 };
+use std::{rc::Rc, str::FromStr};
 
 #[derive(Debug)]
 pub enum Lexeme {
@@ -615,8 +615,7 @@ mod tests {
     assert_eq!(expected_qmark, actual_qmark);
 
     let actual_dash = lex_str!(vm, "-");
-    let expected_dash =
-      vec![Lexeme::Symbol(vm.symbols.get("-").unwrap())];
+    let expected_dash = vec![Lexeme::Symbol(vm.symbols.get("-").unwrap())];
     assert_eq!(expected_dash, actual_dash);
 
     let actual_dashed = lex_str!(vm, "my-symbol");

@@ -16,7 +16,10 @@ pub trait BuiltinFn:
   Fn(&mut VM, &[Gc<DataCell>]) -> Result<Data, Box<dyn Error>>
 {
 }
-impl<T: Fn(&mut VM, &[Gc<DataCell>]) -> Result<Data, Box<dyn Error>>> BuiltinFn for T {}
+impl<T: Fn(&mut VM, &[Gc<DataCell>]) -> Result<Data, Box<dyn Error>>> BuiltinFn
+  for T
+{
+}
 
 impl fmt::Debug for dyn BuiltinFn {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
