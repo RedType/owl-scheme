@@ -43,6 +43,13 @@ impl DataCell {
   pub fn new_info(data: Data, info: SourceInfo) -> Gc<Self> {
     Gc::new(Self { data, info })
   }
+
+  pub fn has_list(&self) -> bool {
+    match self.data {
+      Data::List { .. } => true,
+      _ => false,
+    }
+  }
 }
 
 #[derive(Clone, Debug, Finalize, Trace)]
@@ -127,8 +134,10 @@ impl PartialEq for Data {
     match (self, other) {
       (Nil { .. }, Nil { .. }) => true,
       (Nil { .. }, data) | (data, Nil { .. }) => data.is_nil(),
-      (List { list: l, .. }, List { list: r, .. }) => {
-        if l.borrow().len() != r.borrow().len() {
+      (List { list: l, dotted: ld }, List { list: r, dotted: rd }) => {
+        if ld != rd {
+          false
+        } else if l.borrow().len() != r.borrow().len() {
           false
         } else {
           l.borrow()
@@ -172,25 +181,23 @@ impl fmt::Display for Data {
         let mut iter = borrow.iter().peekable();
         let mut first = true;
 
-        write!(f, "(");
+        write!(f, "(")?;
         while let Some(x) = iter.next() {
           let last = iter.peek().is_none();
           // write leading space
           if first {
             first = false;
           } else {
-            write!(f, " ");
+            write!(f, " ")?;
           }
 
-          let _ = &x.data.fmt(f);
           // check to see if we're at the end
           // if so, print a dot if dotted
           // otherwise just print the element
-          if !last {
-            x.data.fmt(f);
-          } else if *dotted {
-            write!(f, " . ");
-            x.data.fmt(f);
+          if last && *dotted {
+            write!(f, ". {}", x.data)?;
+          } else {
+            write!(f, "{}", x.data)?;
           }
         }
         write!(f, ")")

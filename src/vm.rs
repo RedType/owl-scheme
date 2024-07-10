@@ -420,6 +420,8 @@ impl VM {
   ) -> Result<Gc<DataCell>, VMError> {
     use Data::*;
 
+    let param_ct = parameters.fuse(|a| a.len(), |b| *b);
+
     // evaluate given arguments
     let mut eval_arguments = given_arguments
       .into_iter()
@@ -427,33 +429,47 @@ impl VM {
       .peekable();
 
     // prepare full arguments
-    let mut full_arguments: Vec<Option<Gc<DataCell>>> = Vec::new();
+    let mut full_arguments: Vec<Option<Gc<DataCell>>> =
+      Vec::with_capacity(param_ct);
+    let mut preapplied_arguments = preapplied_arguments.iter().cloned();
     let mut unbound_params = 0;
 
-    for pre in preapplied_arguments.iter().cloned() {
-      match pre {
-        Some(arg) => full_arguments.push(Some(arg)),
-        None => match eval_arguments.next() {
+    // build full_arguments array
+    for _ in 0..param_ct {
+      match preapplied_arguments.next() {
+        // argument was present
+        Some(Some(arg)) => full_arguments.push(Some(arg)),
+        // placeholder or no arg was present
+        Some(None) | None => match eval_arguments.next() {
+          // argument was given
           Some(arg) => {
-              let arg = arg?;
-              match arg.data {
-                  Placeholder => full_arguments.push(None),
-                  _ => full_arguments.push(Some(arg)),
-              }
+            let arg = arg?;
+            match arg.data {
+              // argument given was a placeholder
+              Placeholder => {
+                unbound_params += 1;
+                full_arguments.push(None);
+              },
+              // argument given was a value
+              _ => full_arguments.push(Some(arg)),
+            }
           },
+          // no argument was given
           None => {
             unbound_params += 1;
             full_arguments.push(None);
           },
         },
-      };
+      }
     }
 
+    // build varargs
     if varargs {
       if let Some(true) = full_arguments.last().map(|a| a.is_some()) {
         let last = full_arguments.pop().flatten().unwrap();
         let mut full_varargs = vec![last];
 
+        // consume arguments given past end
         for arg in eval_arguments {
           full_varargs.push(arg?);
         }
@@ -468,18 +484,16 @@ impl VM {
         // were given afterwards
         return Err(VMError::new(EvalError::PlaceholderInVarargs, info));
       }
-
     // check for extraneous arguments
     } else if eval_arguments.peek().is_some() {
       return Err(VMError::new(EvalError::TooManyArguments, info));
     }
 
-    let param_ct = parameters.fuse(|a| a.len(), |b| *b);
     // check for partial application
     if unbound_params > 0 || param_ct > full_arguments.len() {
       let new_proc_name = name.as_ref().map(|name| {
         let mut new_proc_name = name.to_string();
-        write!(new_proc_name, "_p{}", unbound_params);
+        write!(new_proc_name, "_p{}", unbound_params).unwrap();
         Rc::from(new_proc_name)
       });
 
@@ -511,18 +525,17 @@ impl VM {
     } else {
       let new_env = Rc::new(env.new_scope());
 
-      // evaluate arguments
-      let mut eval_arguments = Vec::new();
+      // unwrap arguments
+      let mut unwrapped_arguments = Vec::new();
       for arg in full_arguments {
-        let val = self.eval(env, Gc::clone(arg.as_ref().unwrap()), true)?;
-        eval_arguments.push(val);
+        unwrapped_arguments.push(arg.unwrap());
       }
 
       match parameters {
         // normal procedure
         Or::A(parameters) => {
           // bind arguments
-          let binds = parameters.iter().zip(eval_arguments);
+          let binds = parameters.iter().zip(unwrapped_arguments);
           for (p, a) in binds {
             new_env.bind(p, a);
           }
@@ -541,7 +554,18 @@ impl VM {
           let code = code
             .expect_b("Tried to apply a builtin param list to a non-builtin");
 
-          code(self, &eval_arguments)
+          // unlistify varargs
+          if unwrapped_arguments.last().map(|l| l.has_list()).unwrap_or(false) {
+            let last = unwrapped_arguments.pop().unwrap();
+            let Data::List { ref list, .. } = last.data else {
+              unreachable!();
+            };
+            for arg in list.borrow().iter().cloned() {
+              unwrapped_arguments.push(arg);
+            }
+          }
+
+          code(self, &unwrapped_arguments)
             .map(|data| DataCell::new_info(data, info.clone()))
             .map_err(|err| VMError(err, info.clone()))
         },

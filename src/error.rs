@@ -148,6 +148,9 @@ impl fmt::Display for EvalError {
     use EvalError::*;
 
     match *self {
+      IllegalPlaceholder => {
+        write!(f, "Placeholders can only be used in argument lists")
+      },
       InvalidSpecialForm => {
         write!(f, "incorrect number of arguments given for special form")
       },
@@ -171,10 +174,13 @@ impl fmt::Display for EvalError {
       PlaceholderInParameterList => {
         write!(f, "parameter lists cannot contain placeholders")
       },
-      PlaceholderInVarargs => write!(f, concat!(
-        "variable-length section of argument list",
-        " must not contain placeholders",
-      )),
+      PlaceholderInVarargs => write!(
+        f,
+        concat!(
+          "variable-length section of argument list",
+          " must not contain placeholders",
+        )
+      ),
       TooManyArguments => write!(f, "too many arguments given"),
       UnboundSymbol(ref name) => {
         write!(
