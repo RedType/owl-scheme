@@ -201,7 +201,7 @@ impl VM {
           ///////////////////
           Symbol(ref s) if *s == "lambda".into() => {
             let exps = exps.borrow();
-            build_proc(exps.iter().skip(1), exps.len(), head.info.clone())
+            build_proc(exps.iter().skip(1), exps.len() - 1, head.info.clone())
           },
 
           Symbol(ref s) if *s == "quote".into() => {
@@ -241,7 +241,7 @@ impl VM {
                 ));
               };
               let proc =
-                build_proc(exps.iter().skip(1), exps.len(), head.info.clone())?;
+                build_proc(exps.iter().skip(1), exps.len() - 1, head.info.clone())?;
               env.bind(fn_name, proc);
               Ok(DataCell::new_info(
                 Data::Nil { print: false },

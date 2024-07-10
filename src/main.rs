@@ -78,6 +78,7 @@ fn main() -> io::Result<()> {
           | d @ Data::Complex(420.0, _)
           | d @ Data::Real(420.0)
           | d @ Data::Rational(420, 1) => println!("{} 🔥", d),
+          Data::Nil { print: false } => (),
           d => println!("{}", d),
         },
         Err(error) => println!("{}", error),
