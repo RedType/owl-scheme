@@ -63,7 +63,8 @@ pub fn import_std(vm: &mut VM) {
       "() ()  meow!\n",
       "(OvO) /     \n",
       "(| |)       \n",
-      " ^ ^        ",);
+      " ^ ^        ",
+    );
     Ok(String(GcCell::new(OWL.to_string())))
   });
 
@@ -103,6 +104,10 @@ pub fn import_std(vm: &mut VM) {
     println!();
     Ok(Data::Nil { print: false })
   });
+
+  ////////////////
+  // Predicates //
+  ////////////////
 
   vm.def_builtin("null?", 1, true, |_, args| {
     let res = args.iter().fold(true, |a, x| a && x.data.is_nil());
@@ -218,6 +223,25 @@ pub fn import_std(vm: &mut VM) {
     });
     Ok(Boolean(res))
   });
+
+  /////////////////
+  // Comparisons //
+  /////////////////
+
+  vm.def_builtin("=", 2, true, |_, xs| {
+    let mut eq = true;
+    for slice in xs.windows(2) {
+      let [a, b] = slice else {
+        unreachable!();
+      };
+      eq = eq && a.data == b.data;
+    }
+    Ok(Boolean(eq))
+  });
+
+  ////////////////
+  // Arithmetic //
+  ////////////////
 
   vm.def_builtin("+", 2, true, |vm, xs| {
     xs.iter().fold(Ok(Integer(0)), |a, x| match (a, &x.data) {
