@@ -11,6 +11,7 @@ pub enum Lexeme {
   RParen,
   Quote,
   Dot,
+  Placeholder,
   Symbol(Data),
   Boolean(bool),
   String(String),
@@ -28,6 +29,7 @@ impl PartialEq for Lexeme {
       (RParen, RParen) => true,
       (Quote, Quote) => true,
       (Dot, Dot) => true,
+      (Placeholder, Placeholder) => true,
       (Symbol(Data::Symbol(l)), Symbol(Data::Symbol(r))) => Rc::ptr_eq(l, r),
       (Boolean(l), Boolean(r)) => l == r,
       (String(l), String(r)) => l == r,
@@ -230,6 +232,7 @@ impl VM {
             match scratch_pad.as_str() {
               "#t" | "#true" => push_lex!(Lexeme::Boolean(true)),
               "#f" | "#false" => push_lex!(Lexeme::Boolean(false)),
+              "_" => push_lex!(Lexeme::Placeholder),
               _ => push_lex!(Lexeme::Symbol(self.symbols.add(&scratch_pad))),
             }
             scratch_pad = String::new();
@@ -624,10 +627,14 @@ mod tests {
     assert_eq!(expected_dashed, actual_dashed);
 
     let actual_start_dashed = lex_str!(vm, "-Inf");
-    println!("{:?}", actual_start_dashed);
     let expected_start_dashed =
       vec![Lexeme::Symbol(vm.symbols.get("-Inf").unwrap())];
     assert_eq!(expected_start_dashed, actual_start_dashed);
+
+    let actual_non_placeholder = lex_str!(vm, "__");
+    let expected_non_placeholder =
+      vec![Lexeme::Symbol(vm.symbols.get("__").unwrap())];
+    assert_eq!(expected_non_placeholder, actual_non_placeholder);
 
     // should these produce an error?
     let actual_fake_true = lex_str!(vm, "#tr");
@@ -795,6 +802,15 @@ mod tests {
     let expected_comp3 = vec![Lexeme::Complex(0.0, -5.5)];
     let actual_comp3 = lex_str!(vm, "-5.5i");
     assert_eq!(expected_comp3, actual_comp3);
+  }
+
+  #[test]
+  fn lexeme_placeholder() {
+    let mut vm = VM::no_std();
+
+    let expected = vec![Lexeme::Placeholder];
+    let actual = lex_str!(vm, "_");
+    assert_eq!(expected, actual);
   }
 
   #[test]
