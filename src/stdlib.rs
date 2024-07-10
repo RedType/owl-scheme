@@ -57,7 +57,7 @@ pub fn import_std(vm: &mut VM) {
   }
 
   // functions
-  vm.def_builtin("OvO", 0, |_, _| {
+  vm.def_builtin("OvO", 0, false, |_, _| {
     // auto-format whyyyyy ;A;
     const OWL: &'static str = concat!(
       "() ()  meow!\n",
@@ -67,7 +67,7 @@ pub fn import_std(vm: &mut VM) {
     Ok(String(GcCell::new(OWL.to_string())))
   });
 
-  vm.def_builtin("OwO", 0, |_, _| {
+  vm.def_builtin("OwO", 0, false, |_, _| {
     const LUGIA: &'static str = concat!(
       "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢻⣦⣄⠀⠀⡄⠀⠀⠀⠀⠀⠀⠀⠀⠀\n",
       "⠀⠀⠀⠀⠀⠀⠀⠀⠀⢤⠄⣸⣿⣿⣷⡔⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\n",
@@ -88,7 +88,7 @@ pub fn import_std(vm: &mut VM) {
     Ok(String(GcCell::new(LUGIA.to_string())))
   });
 
-  vm.def_builtin("print", 1, |_, args| {
+  vm.def_builtin("print", 1, true, |_, args| {
     for arg in args {
       print!("{}", arg.data);
     }
@@ -96,7 +96,7 @@ pub fn import_std(vm: &mut VM) {
     Ok(Data::Nil { print: false })
   });
 
-  vm.def_builtin("println", 1, |_, args| {
+  vm.def_builtin("println", 1, true, |_, args| {
     for arg in args {
       print!("{}", arg.data);
     }
@@ -104,12 +104,12 @@ pub fn import_std(vm: &mut VM) {
     Ok(Data::Nil { print: false })
   });
 
-  vm.def_builtin("null?", 1, |_, args| {
+  vm.def_builtin("null?", 1, true, |_, args| {
     let res = args.iter().fold(true, |a, x| a && x.data.is_nil());
     Ok(Boolean(res))
   });
 
-  vm.def_builtin("number?", 1, |_, args| {
+  vm.def_builtin("number?", 1, true, |_, args| {
     let res = args.iter().fold(true, |a, x| {
       a && match x.data {
         Complex(_, _) | Real(_) | Rational(_, _) | Integer(_) => true,
@@ -119,7 +119,7 @@ pub fn import_std(vm: &mut VM) {
     Ok(Boolean(res))
   });
 
-  vm.def_builtin("complex?", 1, |_, args| {
+  vm.def_builtin("complex?", 1, true, |_, args| {
     let res = args.iter().fold(true, |a, x| {
       a && match x.data {
         Complex(_, _) | Real(_) | Rational(_, _) | Integer(_) => true,
@@ -129,7 +129,7 @@ pub fn import_std(vm: &mut VM) {
     Ok(Boolean(res))
   });
 
-  vm.def_builtin("real?", 1, |_, args| {
+  vm.def_builtin("real?", 1, true, |_, args| {
     let res = args.iter().fold(true, |a, x| {
       a && match x.data {
         Complex(_, i) => i == 0.0,
@@ -140,7 +140,7 @@ pub fn import_std(vm: &mut VM) {
     Ok(Boolean(res))
   });
 
-  vm.def_builtin("rational?", 1, |_, args| {
+  vm.def_builtin("rational?", 1, true, |_, args| {
     let res = args.iter().fold(true, |a, x| {
       a && match x.data {
         Complex(r, i) => i == 0.0 && r.round() == r,
@@ -152,7 +152,7 @@ pub fn import_std(vm: &mut VM) {
     Ok(Boolean(res))
   });
 
-  vm.def_builtin("integer?", 1, |_, args| {
+  vm.def_builtin("integer?", 1, true, |_, args| {
     let res = args.iter().fold(true, |a, x| {
       a && match x.data {
         Complex(r, i) => i == 0.0 && r.round() == r,
@@ -165,7 +165,7 @@ pub fn import_std(vm: &mut VM) {
     Ok(Boolean(res))
   });
 
-  vm.def_builtin("exact?", 1, |_, args| {
+  vm.def_builtin("exact?", 1, true, |_, args| {
     let res = args.iter().fold(true, |a, x| {
       a && match x.data {
         Rational(_, _) | Integer(_) => true,
@@ -175,7 +175,7 @@ pub fn import_std(vm: &mut VM) {
     Ok(Boolean(res))
   });
 
-  vm.def_builtin("inexact?", 1, |_, args| {
+  vm.def_builtin("inexact?", 1, true, |_, args| {
     let res = args.iter().fold(true, |a, x| {
       a && match x.data {
         Complex(_, _) | Real(_) => true,
@@ -185,7 +185,7 @@ pub fn import_std(vm: &mut VM) {
     Ok(Boolean(res))
   });
 
-  vm.def_builtin("exact-integer?", 1, |_, args| {
+  vm.def_builtin("exact-integer?", 1, true, |_, args| {
     let res = args.iter().fold(true, |a, x| {
       a && match x.data {
         Rational(_, d) => d == 1,
@@ -196,7 +196,7 @@ pub fn import_std(vm: &mut VM) {
     Ok(Boolean(res))
   });
 
-  vm.def_builtin("finite?", 1, |_, args| {
+  vm.def_builtin("finite?", 1, true, |_, args| {
     let res = args.iter().fold(true, |a, x| {
       a && match x.data {
         Complex(r, i) => r.is_finite() && i.is_finite(),
@@ -208,7 +208,7 @@ pub fn import_std(vm: &mut VM) {
     Ok(Boolean(res))
   });
 
-  vm.def_builtin("infinite?", 1, |_, args| {
+  vm.def_builtin("infinite?", 1, true, |_, args| {
     let res = args.iter().fold(true, |a, x| {
       a && match x.data {
         Complex(r, i) => r.is_infinite() || i.is_infinite(),
@@ -219,7 +219,7 @@ pub fn import_std(vm: &mut VM) {
     Ok(Boolean(res))
   });
 
-  vm.def_builtin("+", 2, |vm, xs| {
+  vm.def_builtin("+", 2, true, |vm, xs| {
     xs.iter().fold(Ok(Integer(0)), |a, x| match (a, &x.data) {
       (Ok(Integer(l)), &Integer(r)) => Ok(Integer(l + r)),
       (Ok(Integer(i)), &Rational(n, d)) | (Ok(Rational(n, d)), &Integer(i)) => {
@@ -256,7 +256,7 @@ pub fn import_std(vm: &mut VM) {
     })
   });
 
-  vm.def_builtin("*", 2, |vm, xs| {
+  vm.def_builtin("*", 2, true, |vm, xs| {
     xs.iter().fold(Ok(Integer(1)), |a, x| match (a, &x.data) {
       (Ok(Integer(l)), &Integer(r)) => Ok(Integer(l * r)),
       (Ok(Integer(i)), &Rational(n, d)) | (Ok(Rational(n, d)), &Integer(i)) => {
@@ -294,7 +294,7 @@ pub fn import_std(vm: &mut VM) {
     })
   });
 
-  vm.def_builtin("-", 2, |vm, xs| {
+  vm.def_builtin("-", 2, true, |vm, xs| {
     if xs.len() == 0 {
       Err(Box::new(UnspecifiedError))
     } else if xs.len() == 1 {
@@ -342,7 +342,7 @@ pub fn import_std(vm: &mut VM) {
     }
   });
 
-  vm.def_builtin("/", 2, |vm, xs| {
+  vm.def_builtin("/", 2, true, |vm, xs| {
     if xs.len() == 0 {
       Err(Box::new(UnspecifiedError))
     } else if xs.len() == 1 {

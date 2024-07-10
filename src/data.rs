@@ -50,21 +50,27 @@ pub enum Data {
   Nil {
     print: bool,
   },
-  List(GcCell<VecDeque<Gc<DataCell>>>),
+  List {
+    list: GcCell<VecDeque<Gc<DataCell>>>,
+    dotted: bool,
+  },
+  Placeholder,
   Symbol(Rc<str>),
   String(GcCell<String>),
   Boolean(bool),
   Builtin {
     name: Rc<str>,
     parameters: usize,
-    arguments: Vec<Gc<DataCell>>, // for partial application
+    varargs: bool,
+    arguments: Vec<Option<Gc<DataCell>>>, // for partial application
     #[unsafe_ignore_trace]
     code: Rc<dyn BuiltinFn>,
   },
   Procedure {
     name: Option<Rc<str>>,
     parameters: Vec<Rc<str>>,
-    arguments: Vec<Gc<DataCell>>, // for partial application
+    varargs: bool,
+    arguments: Vec<Option<Gc<DataCell>>>, // for partial application
     code: Gc<DataCell>,
   },
   // numbers
@@ -75,15 +81,29 @@ pub enum Data {
 }
 
 impl Data {
-  pub fn nil() -> Data {
+  pub fn nil() -> Self {
     Self::Nil { print: true }
+  }
+
+  pub fn list<I: IntoIterator<Item = Gc<DataCell>>>(items: I) -> Self {
+    Self::List {
+      list: GcCell::new(items.into_iter().collect::<VecDeque<_>>()),
+      dotted: false,
+    }
+  }
+
+  pub fn dotted_list<I: IntoIterator<Item = Gc<DataCell>>>(items: I) -> Self {
+    Self::List {
+      list: GcCell::new(items.into_iter().collect::<VecDeque<_>>()),
+      dotted: true,
+    }
   }
 
   pub fn is_nil(&self) -> bool {
     if let Self::Nil { .. } = self {
       true
-    } else if let Self::List(xs) = self {
-      xs.borrow().is_empty()
+    } else if let Self::List { list, .. } = self {
+      list.borrow().is_empty()
     } else {
       false
     }
@@ -107,7 +127,7 @@ impl PartialEq for Data {
     match (self, other) {
       (Nil { .. }, Nil { .. }) => true,
       (Nil { .. }, data) | (data, Nil { .. }) => data.is_nil(),
-      (List(l), List(r)) => {
+      (List { list: l, .. }, List { list: r, .. }) => {
         if l.borrow().len() != r.borrow().len() {
           false
         } else {
@@ -133,6 +153,7 @@ impl PartialEq for Data {
         (lr - rr).abs() < 0.0000001 && (li - ri).abs() < 0.0000001
       },
       (Real(l), Real(r)) => (l - r).abs() < 0.0000001,
+      (Placeholder, Placeholder) => true,
       _ => false,
     }
   }
@@ -146,34 +167,31 @@ impl fmt::Display for Data {
       Nil { print: true } => write!(f, "()"),
       Nil { print: false } => Ok(()),
 
-      List(xs) => {
-        let borrow = xs.borrow();
+      List { list, dotted } => {
+        let borrow = list.borrow();
         let mut iter = borrow.iter().peekable();
         let mut first = true;
 
-        write!(f, "(")?;
+        write!(f, "(");
         while let Some(x) = iter.next() {
-          //let last = iter.peek().is_none();
+          let last = iter.peek().is_none();
           // write leading space
           if first {
             first = false;
           } else {
-            write!(f, " ")?;
+            write!(f, " ");
           }
 
-          let _ = &x.data.fmt(f)?;
-          /* no longer using nil to end lists
+          let _ = &x.data.fmt(f);
           // check to see if we're at the end
-          // if so, print a dot for non-nil and print nothing for nil
+          // if so, print a dot if dotted
           // otherwise just print the element
           if !last {
-            self.display_data_rec(f, &x.data);
+            x.data.fmt(f);
+          } else if *dotted {
+            write!(f, " . ");
+            x.data.fmt(f);
           }
-          else if !x.data.is_nil() {
-            write!(f, " . ").unwrap();
-            self.display_data_rec(f, &x.data);
-          }
-          */
         }
         write!(f, ")")
       },
@@ -204,6 +222,7 @@ impl fmt::Display for Data {
       Procedure {
         name,
         parameters,
+        varargs: _,
         arguments,
         code,
       } => {
@@ -222,6 +241,7 @@ impl fmt::Display for Data {
           write!(f, "<procedure {:x}>", hash)
         }
       },
+      Placeholder => write!(f, "_"),
     }
   }
 }
@@ -368,18 +388,18 @@ mod tests {
     let nil = Data::nil();
     assert_eq!(nil.to_string(), "()");
 
-    let list = List(GcCell::new(
+    let list = Data::list(
       [symbol, string, tru, fals, int, float]
         .into_iter()
         .map(|e| DataCell::new_info(e, SourceInfo::blank()))
         .collect::<VecDeque<_>>(),
-    ));
+    );
     assert_eq!(
       list.to_string(),
       "(jeremy \"upright bass\" #true #false 35 123.4)"
     );
 
-    let dotted = List(GcCell::new(
+    let dotted = Data::dotted_list(
       [
         Real(12.0),
         String(GcCell::new("oy".into())),
@@ -388,10 +408,9 @@ mod tests {
       ]
       .into_iter()
       .map(|e| DataCell::new_info(e, SourceInfo::blank()))
-      .collect::<VecDeque<_>>(),
-    ));
-    // no longer printing dots
-    assert_eq!(dotted.to_string(), "(12 \"oy\" () 0.23456)");
+      .collect::<VecDeque<_>>()
+    );
+    assert_eq!(dotted.to_string(), "(12 \"oy\" () . 0.23456)");
   }
 
   #[test]

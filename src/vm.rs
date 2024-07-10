@@ -2,7 +2,7 @@ use crate::{
   data::{BuiltinFn, Data, DataCell, Env, SymbolTable},
   error::{EvalError, SourceInfo, VMError},
   stdlib,
-  util::LRU,
+  util::{Or, LRU},
 };
 use gc::Gc;
 use prime_factorization::Factorization;
@@ -45,6 +45,7 @@ impl VM {
     &mut self,
     name: S,
     parameters: usize,
+    varargs: bool,
     code: F,
   ) {
     // create/retrieve symbol
@@ -60,6 +61,7 @@ impl VM {
         Data::Builtin {
           name: Rc::clone(name),
           parameters,
+          varargs,
           arguments: Vec::new(),
           code: Rc::new(code),
         },
@@ -146,7 +148,7 @@ impl VM {
     let asts = self.build_ast(lexemes)?;
     asts
       .into_iter()
-      .map(|ast| self.eval(&Rc::clone(&self.global_env), ast))
+      .map(|ast| self.eval(&Rc::clone(&self.global_env), ast, false))
       .reduce(|a, data| a.and(data))
       .unwrap()
   }
@@ -155,14 +157,14 @@ impl VM {
     &mut self,
     env: &Rc<Env>,
     expr: Gc<DataCell>,
+    allow_placeholders: bool,
   ) -> Result<Gc<DataCell>, VMError> {
     use Data::*;
 
     match expr.data {
-      Nil { .. } => Err(VMError::new(
-        EvalError::NilEvaluation,
-        expr.info.clone(),
-      )),
+      Nil { .. } => {
+        Err(VMError::new(EvalError::NilEvaluation, expr.info.clone()))
+      },
       // self-evaluating expressions
       Boolean(_)
       | String(_)
@@ -173,6 +175,17 @@ impl VM {
       | Builtin { .. }
       | Procedure { .. } => Ok(Gc::clone(&expr)),
 
+      Placeholder => {
+        if allow_placeholders {
+          Ok(Gc::clone(&expr))
+        } else {
+          Err(VMError::new(
+            EvalError::IllegalPlaceholder,
+            expr.info.clone(),
+          ))
+        }
+      },
+
       // variable lookup
       Symbol(ref name) => env.lookup(name).ok_or(VMError::new(
         EvalError::UnboundSymbol(Rc::clone(name)),
@@ -180,69 +193,15 @@ impl VM {
       )),
 
       // function application & special forms
-      List(ref exps) => match exps.borrow().front().as_ref() {
-        None => Err(VMError::new(
-          EvalError::NilEvaluation,
-          expr.info.clone(),
-        )),
+      List { list: ref exps, .. } => match exps.borrow().front().as_ref() {
+        None => Err(VMError::new(EvalError::NilEvaluation, expr.info.clone())),
         Some(head) => match head.data {
           ///////////////////
           // special forms //
           ///////////////////
           Symbol(ref s) if *s == "lambda".into() => {
             let exps = exps.borrow();
-            let exps_len = exps.len();
-            // get lambda name, if applicable
-            let name = if exps_len == 3 {
-              // this is an anonymous lambda (without a name)
-              None
-            } else if exps_len == 4 {
-              // this lambda is named
-              if let Symbol(ref name) = exps[1].data {
-                Some(Rc::clone(name))
-              } else {
-                return Err(VMError::new(
-                  EvalError::InvalidLambdaName,
-                  head.info.clone(),
-                ));
-              }
-            } else {
-              return Err(VMError::new(
-                EvalError::InvalidSpecialForm,
-                head.info.clone(),
-              ));
-            };
-
-            // construct parameter list
-            let mut parameters = Vec::new();
-            if let List(ref ps) = exps[1].data {
-              parameters.reserve_exact(ps.borrow().len());
-              for p in ps.borrow().iter() {
-                if let Symbol(ref s) = p.data {
-                  parameters.push(Rc::clone(s));
-                } else {
-                  return Err(VMError::new(
-                    EvalError::InvalidParameter,
-                    head.info.clone(),
-                  ));
-                }
-              }
-            } else {
-              return Err(VMError::new(
-                EvalError::InvalidParameterList,
-                head.info.clone(),
-              ));
-            }
-
-            // build procedure
-            let proc = Procedure {
-              name,
-              parameters,
-              arguments: Vec::new(),
-              code: Gc::clone(&exps[2]),
-            };
-
-            Ok(DataCell::new_info(proc, head.info.clone()))
+            build_proc(exps.iter().skip(1), exps.len(), head.info.clone())
           },
 
           Symbol(ref s) if *s == "quote".into() => {
@@ -259,14 +218,37 @@ impl VM {
 
           Symbol(ref s) if *s == "define".into() => {
             let exps = exps.borrow();
-            if exps.len() != 3 {
-              Err(VMError::new(
-                EvalError::InvalidSpecialForm,
+            // binding syntax
+            if exps.len() == 3 {
+              let Symbol(ref fn_name) = exps[1].data else {
+                return Err(VMError::new(
+                  EvalError::InvalidSpecialForm,
+                  head.info.clone(),
+                ));
+              };
+              env.bind(fn_name, self.eval(env, Gc::clone(&exps[2]), false)?);
+              Ok(DataCell::new_info(
+                Data::Nil { print: false },
                 head.info.clone(),
               ))
-            } else if let Symbol(ref s) = exps[1].data {
-              env.bind(s, self.eval(env, Gc::clone(&exps[2]))?);
-              Ok(DataCell::new_info(Data::nil(), head.info.clone()))
+
+            // function declaration syntax
+            } else if exps.len() == 4 {
+              let Symbol(ref fn_name) = exps[1].data else {
+                return Err(VMError::new(
+                  EvalError::InvalidSpecialForm,
+                  head.info.clone(),
+                ));
+              };
+              let proc =
+                build_proc(exps.iter().skip(1), exps.len(), head.info.clone())?;
+              env.bind(fn_name, proc);
+              Ok(DataCell::new_info(
+                Data::Nil { print: false },
+                head.info.clone(),
+              ))
+
+            // invalid define
             } else {
               Err(VMError::new(
                 EvalError::InvalidSpecialForm,
@@ -303,9 +285,9 @@ impl VM {
               ))
             } else {
               // evaluate condition
-              match self.eval(env, Gc::clone(&exps[1]))?.data {
-                Boolean(true) => self.eval(env, Gc::clone(&exps[2])),
-                Boolean(false) => self.eval(env, Gc::clone(&exps[3])),
+              match self.eval(env, Gc::clone(&exps[1]), false)?.data {
+                Boolean(true) => self.eval(env, Gc::clone(&exps[2]), false),
+                Boolean(false) => self.eval(env, Gc::clone(&exps[3]), false),
                 _ => Err(VMError::new(
                   EvalError::NonBooleanTest,
                   head.info.clone(),
@@ -345,7 +327,7 @@ impl VM {
                 let mut evaluated =
                   DataCell::new_info(Data::nil(), head.info.clone());
                 for code in codes {
-                  evaluated = self.eval(env, code)?;
+                  evaluated = self.eval(env, code, false)?;
                 }
 
                 Ok(evaluated)
@@ -361,12 +343,13 @@ impl VM {
           // function application
           _ => {
             let exps = exps.borrow();
-            let headval = self.eval(env, Gc::clone(*head))?;
+            let headval = self.eval(env, Gc::clone(*head), false)?;
             let res = match headval.data {
               // procedure call
               Procedure {
                 ref name,
                 ref parameters,
+                varargs,
                 ref arguments,
                 ref code,
               } => {
@@ -377,13 +360,13 @@ impl VM {
                 }
                 self.apply(
                   &env,
-                  name,
+                  name.as_ref(),
                   head.info.clone(),
-                  parameters,
+                  Or::A(parameters),
+                  varargs,
                   arguments,
                   exps.iter().skip(1).cloned(),
-                  given_args_len,
-                  code,
+                  Or::A(code),
                 )
               },
 
@@ -391,6 +374,7 @@ impl VM {
               Builtin {
                 ref name,
                 parameters,
+                varargs,
                 ref arguments,
                 ref code,
               } => {
@@ -399,15 +383,15 @@ impl VM {
                 if parameters != 0 && given_args_len == 0 {
                   return Ok(headval);
                 }
-                self.apply_builtin(
+                self.apply(
                   env,
-                  name,
+                  Some(&name),
                   head.info.clone(),
-                  parameters,
+                  Or::B(parameters),
+                  varargs,
                   arguments,
                   exps.iter().skip(1).cloned(),
-                  given_args_len,
-                  code,
+                  Or::B(code),
                 )
               },
 
@@ -426,127 +410,209 @@ impl VM {
   pub fn apply<I: IntoIterator<Item = Gc<DataCell>>>(
     &mut self,
     env: &Rc<Env>,
-    name: &Option<Rc<str>>,
+    name: Option<&Rc<str>>,
     info: SourceInfo,
-    parameters: &[Rc<str>],
-    preapplied_arguments: &[Gc<DataCell>],
+    parameters: Or<&[Rc<str>], usize>,
+    mut varargs: bool,
+    preapplied_arguments: &[Option<Gc<DataCell>>],
     given_arguments: I,
-    given_arguments_count: usize,
-    code: &Gc<DataCell>,
+    code: Or<&Gc<DataCell>, &Rc<dyn BuiltinFn>>,
   ) -> Result<Gc<DataCell>, VMError> {
     use Data::*;
 
-    // check for partial application
-    let remaining = parameters.len() as isize
-      - preapplied_arguments.len() as isize
-      - given_arguments_count as isize;
+    // evaluate given arguments
+    let mut eval_arguments = given_arguments
+      .into_iter()
+      .map(|a| self.eval(env, Gc::clone(&a), true))
+      .peekable();
 
-    if remaining > 0 {
-      // this is a partial application
+    // prepare full arguments
+    let mut full_arguments: Vec<Option<Gc<DataCell>>> = Vec::new();
+    let mut unbound_params = 0;
+
+    for pre in preapplied_arguments.iter().cloned() {
+      match pre {
+        Some(arg) => full_arguments.push(Some(arg)),
+        None => match eval_arguments.next() {
+          Some(arg) => {
+              let arg = arg?;
+              match arg.data {
+                  Placeholder => full_arguments.push(None),
+                  _ => full_arguments.push(Some(arg)),
+              }
+          },
+          None => {
+            unbound_params += 1;
+            full_arguments.push(None);
+          },
+        },
+      };
+    }
+
+    if varargs {
+      if let Some(true) = full_arguments.last().map(|a| a.is_some()) {
+        let last = full_arguments.pop().flatten().unwrap();
+        let mut full_varargs = vec![last];
+
+        for arg in eval_arguments {
+          full_varargs.push(arg?);
+        }
+        full_arguments.push(Some(DataCell::new_info(
+          Data::list(full_varargs),
+          info.clone(),
+        )));
+
+        varargs = false;
+      } else if eval_arguments.peek().is_some() {
+        // a placeholder was given for final named parameter, but more arguments
+        // were given afterwards
+        return Err(VMError::new(EvalError::PlaceholderInVarargs, info));
+      }
+
+    // check for extraneous arguments
+    } else if eval_arguments.peek().is_some() {
+      return Err(VMError::new(EvalError::TooManyArguments, info));
+    }
+
+    let param_ct = parameters.fuse(|a| a.len(), |b| *b);
+    // check for partial application
+    if unbound_params > 0 || param_ct > full_arguments.len() {
       let new_proc_name = name.as_ref().map(|name| {
         let mut new_proc_name = name.to_string();
-        write!(new_proc_name, "_p{}", remaining).unwrap();
+        write!(new_proc_name, "_p{}", unbound_params);
         Rc::from(new_proc_name)
       });
 
-      let full_arguments = preapplied_arguments
-        .iter()
-        .cloned()
-        .chain(given_arguments.into_iter())
-        .collect::<_>();
-
-      let new_partial = Procedure {
-        name: new_proc_name,
-        parameters: parameters.iter().cloned().collect::<_>(),
-        arguments: full_arguments,
-        code: Gc::clone(&code),
-      };
+      let new_partial =
+        match parameters {
+          Or::A(parameters) => Procedure {
+            name: new_proc_name,
+            parameters: parameters.iter().cloned().collect::<_>(),
+            varargs,
+            arguments: full_arguments,
+            code: Gc::clone(&code.expect_a(
+              "Tried to apply a non-builtin param list to a builtin",
+            )),
+          },
+          Or::B(parameters) => Builtin {
+            name: new_proc_name.expect("All builtins must be named"),
+            parameters,
+            varargs,
+            arguments: full_arguments,
+            code: Rc::clone(&code.expect_b(
+              "Tried to apply a builtin param list to a non-builtin",
+            )),
+          },
+        };
 
       Ok(DataCell::new_info(new_partial, info))
-    } else if remaining == 0 {
-      // this is a full application
+
+    // full application
+    } else {
       let new_env = Rc::new(env.new_scope());
 
-      // apply arguments
-      let full_arguments = preapplied_arguments
-        .iter()
-        .cloned()
-        .chain(given_arguments.into_iter())
-        .map(|arg| self.eval(env, arg));
-
-      let binds = parameters.iter().zip(full_arguments);
-      for (p, a) in binds {
-        new_env.bind(p, a?);
-      }
-
-      // evaluate and return
-      self.eval(&new_env, Gc::clone(&code))
-    } else {
-      // too many arguments applied
-      Err(VMError::new(EvalError::TooManyArguments, info))
-    }
-  }
-
-  pub fn apply_builtin<I: IntoIterator<Item = Gc<DataCell>>>(
-    &mut self,
-    env: &Rc<Env>,
-    name: &Rc<str>,
-    info: SourceInfo,
-    parameters: usize,
-    preapplied_arguments: &[Gc<DataCell>],
-    given_arguments: I,
-    given_arguments_count: usize,
-    code: &Rc<dyn BuiltinFn>,
-  ) -> Result<Gc<DataCell>, VMError> {
-    use Data::*;
-
-    // check for partial application
-    let remaining = parameters as isize
-      - preapplied_arguments.len() as isize
-      - given_arguments_count as isize;
-
-    if remaining > 0 {
-      // this is a partial application
-      let mut new_proc_name_buffer = name.to_string();
-      write!(new_proc_name_buffer, "_p{}", remaining).unwrap();
-      let new_proc_name = Rc::from(new_proc_name_buffer);
-
-      let full_arguments = preapplied_arguments
-        .iter()
-        .cloned()
-        .chain(given_arguments.into_iter())
-        .collect::<_>();
-
-      let new_partial = Builtin {
-        name: new_proc_name,
-        parameters: remaining as usize,
-        arguments: full_arguments,
-        code: Rc::clone(&code),
-      };
-
-      Ok(DataCell::new_info(new_partial, info))
-    } else if remaining == 0 {
-      // this is a full application
-      let full_arguments = preapplied_arguments
-        .iter()
-        .cloned()
-        .chain(given_arguments.into_iter())
-        .map(|arg| self.eval(env, arg));
-
-      let mut collected_arguments = Vec::new();
+      // evaluate arguments
+      let mut eval_arguments = Vec::new();
       for arg in full_arguments {
-        collected_arguments.push(arg?);
+        let val = self.eval(env, Gc::clone(arg.as_ref().unwrap()), true)?;
+        eval_arguments.push(val);
       }
 
-      // evaluate and return
-      code(self, &collected_arguments)
-        .map(|data| DataCell::new_info(data, info.clone()))
-        .map_err(|err| VMError(err, info.clone()))
-    } else {
-      // too many arguments applied
-      Err(VMError(Box::new(EvalError::TooManyArguments), info))
+      match parameters {
+        // normal procedure
+        Or::A(parameters) => {
+          // bind arguments
+          let binds = parameters.iter().zip(eval_arguments);
+          for (p, a) in binds {
+            new_env.bind(p, a);
+          }
+
+          // evaluate and return
+          self.eval(
+            &new_env,
+            Gc::clone(&code.expect_a(
+              "Tried to apply a non-builtin param list to a builtin",
+            )),
+            false,
+          )
+        },
+        // builtin procedure
+        Or::B(_) => {
+          let code = code
+            .expect_b("Tried to apply a builtin param list to a non-builtin");
+
+          code(self, &eval_arguments)
+            .map(|data| DataCell::new_info(data, info.clone()))
+            .map_err(|err| VMError(err, info.clone()))
+        },
+      }
     }
   }
+}
+
+/////////////
+// Helpers //
+/////////////
+fn build_proc<'a, I>(
+  mut exps: I,
+  len: usize,
+  info: SourceInfo,
+) -> Result<Gc<DataCell>, VMError>
+where
+  I: Iterator<Item = &'a Gc<DataCell>>,
+{
+  use Data::*;
+
+  // get proc name, if applicable
+  let name = if len == 2 {
+    // this is an anonymous lambda (without a name)
+    None
+  } else if len == 3 {
+    // this lambda is named
+    if let Symbol(ref name) = exps.next().unwrap().data {
+      Some(Rc::clone(name))
+    } else {
+      return Err(VMError::new(EvalError::InvalidLambdaName, info));
+    }
+  } else {
+    return Err(VMError::new(EvalError::InvalidSpecialForm, info));
+  };
+
+  // construct parameter list
+  let mut parameters = Vec::new();
+  let varargs;
+  match exps.next().unwrap().data {
+    List { ref list, dotted } => {
+      varargs = dotted;
+      parameters.reserve_exact(list.borrow().len());
+      for parameter in list.borrow().iter() {
+        match parameter.data {
+          Symbol(ref name) => parameters.push(Rc::clone(name)),
+          Placeholder => {
+            return Err(VMError::new(
+              EvalError::PlaceholderInParameterList,
+              info,
+            ))
+          },
+          _ => return Err(VMError::new(EvalError::InvalidParameter, info)),
+        }
+      }
+    },
+    _ => {
+      return Err(VMError::new(EvalError::NonSymbolInParameterList, info));
+    },
+  }
+
+  // build procedure
+  let proc = Procedure {
+    name,
+    parameters,
+    varargs,
+    arguments: Vec::new(),
+    code: Gc::clone(exps.next().unwrap()),
+  };
+
+  Ok(DataCell::new_info(proc, info))
 }
 
 #[cfg(test)]

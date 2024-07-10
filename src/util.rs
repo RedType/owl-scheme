@@ -144,6 +144,105 @@ fn hash<T: Hash>(t: &T) -> u64 {
   hasher.finish()
 }
 
+pub enum Or<A, B> {
+  A(A),
+  B(B),
+}
+
+impl<A, B> Or<A, B> {
+  pub fn is_a(&self) -> bool {
+    match self {
+      Self::A(_) => true,
+      Self::B(_) => false,
+    }
+  }
+
+  pub fn is_b(&self) -> bool {
+    !self.is_a()
+  }
+
+  pub fn a(&self) -> Option<&A> {
+    match self {
+      Self::A(ref a) => Some(a),
+      Self::B(_) => None,
+    }
+  }
+
+  pub fn b(&self) -> Option<&B> {
+    match self {
+      Self::A(_) => None,
+      Self::B(ref b) => Some(b),
+    }
+  }
+
+  pub fn a_mut(&mut self) -> Option<&mut A> {
+    match self {
+      Self::A(ref mut a) => Some(a),
+      Self::B(_) => None,
+    }
+  }
+
+  pub fn b_mut(&mut self) -> Option<&mut B> {
+    match self {
+      Self::A(_) => None,
+      Self::B(ref mut b) => Some(b),
+    }
+  }
+
+  pub fn extract_a(self) -> Option<A> {
+    match self {
+      Self::A(a) => Some(a),
+      Self::B(_) => None,
+    }
+  }
+
+  pub fn extract_b(self) -> Option<B> {
+    match self {
+      Self::A(_) => None,
+      Self::B(b) => Some(b),
+    }
+  }
+
+  pub fn unwrap_a(self) -> A {
+    match self {
+      Self::A(a) => a,
+      Self::B(_) => panic!("Tried to unwrap_a from a B value"),
+    }
+  }
+
+  pub fn unwrap_b(self) -> B {
+    match self {
+      Self::A(_) => panic!("Tried to unwrap_b from an A value"),
+      Self::B(b) => b,
+    }
+  }
+
+  pub fn expect_a<S: AsRef<str>>(self, msg: S) -> A {
+    match self {
+      Self::A(a) => a,
+      Self::B(_) => panic!("{}", msg.as_ref()),
+    }
+  }
+
+  pub fn expect_b<S: AsRef<str>>(self, msg: S) -> B {
+    match self {
+      Self::A(_) => panic!("{}", msg.as_ref()),
+      Self::B(b) => b,
+    }
+  }
+
+  pub fn fuse<F, G, O>(&self, f: F, g: G) -> O
+  where
+    F: FnOnce(&A) -> O,
+    G: FnOnce(&B) -> O,
+  {
+    match self {
+      Self::A(ref a) => f(a),
+      Self::B(ref b) => g(b),
+    }
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;

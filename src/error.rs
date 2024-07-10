@@ -126,6 +126,7 @@ impl fmt::Display for ArithmeticError {
 
 #[derive(Debug, Error)]
 pub enum EvalError {
+  IllegalPlaceholder,
   InvalidSpecialForm,
   InvalidLambdaName,
   InvalidParameter,
@@ -135,6 +136,9 @@ pub enum EvalError {
   NilEvaluation,
   NonBooleanTest,
   NonFunctionApplication(Data),
+  NonSymbolInParameterList,
+  PlaceholderInParameterList,
+  PlaceholderInVarargs,
   TooManyArguments,
   UnboundSymbol(Rc<str>),
 }
@@ -161,6 +165,16 @@ impl fmt::Display for EvalError {
       NonFunctionApplication(_) => {
         write!(f, "non-function values cannot be applied")
       },
+      NonSymbolInParameterList => {
+        write!(f, "parameter lists must only contain symbols")
+      },
+      PlaceholderInParameterList => {
+        write!(f, "parameter lists cannot contain placeholders")
+      },
+      PlaceholderInVarargs => write!(f, concat!(
+        "variable-length section of argument list",
+        " must not contain placeholders",
+      )),
       TooManyArguments => write!(f, "too many arguments given"),
       UnboundSymbol(ref name) => {
         write!(
