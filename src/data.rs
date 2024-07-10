@@ -141,7 +141,16 @@ impl PartialEq for Data {
     match (self, other) {
       (Nil { .. }, Nil { .. }) => true,
       (Nil { .. }, data) | (data, Nil { .. }) => data.is_nil(),
-      (List { list: l, dotted: ld }, List { list: r, dotted: rd }) => {
+      (
+        List {
+          list: l,
+          dotted: ld,
+        },
+        List {
+          list: r,
+          dotted: rd,
+        },
+      ) => {
         if ld != rd {
           false
         } else if l.borrow().len() != r.borrow().len() {
@@ -422,7 +431,7 @@ mod tests {
       ]
       .into_iter()
       .map(|e| DataCell::new_info(e, SourceInfo::blank()))
-      .collect::<VecDeque<_>>()
+      .collect::<VecDeque<_>>(),
     );
     assert_eq!(dotted.to_string(), "(12 \"oy\" () . 0.23456)");
   }

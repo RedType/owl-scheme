@@ -240,8 +240,11 @@ impl VM {
                   head.info.clone(),
                 ));
               };
-              let proc =
-                build_proc(exps.iter().skip(1), exps.len() - 1, head.info.clone())?;
+              let proc = build_proc(
+                exps.iter().skip(1),
+                exps.len() - 1,
+                head.info.clone(),
+              )?;
               env.bind(fn_name, proc);
               Ok(DataCell::new_info(
                 Data::Nil { print: false },
@@ -555,7 +558,11 @@ impl VM {
             .expect_b("Tried to apply a builtin param list to a non-builtin");
 
           // unlistify varargs
-          if unwrapped_arguments.last().map(|l| l.has_list()).unwrap_or(false) {
+          if unwrapped_arguments
+            .last()
+            .map(|l| l.has_list())
+            .unwrap_or(false)
+          {
             let last = unwrapped_arguments.pop().unwrap();
             let Data::List { ref list, .. } = last.data else {
               unreachable!();

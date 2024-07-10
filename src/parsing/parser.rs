@@ -57,7 +57,11 @@ impl VM {
                 Data::list(list)
               } else if list.back().map(|e| e.has_list()).unwrap_or(false) {
                 let last = list.pop_back().unwrap();
-                let Data::List { list: ref inner_list, .. } = last.data else {
+                let Data::List {
+                  list: ref inner_list,
+                  ..
+                } = last.data
+                else {
                   unreachable!();
                 };
                 for elem in inner_list.borrow().iter().cloned() {
@@ -227,10 +231,7 @@ mod tests {
       l![vm.symbols.get("a").unwrap() /*Data::nil()*/,],
       l![vm.symbols.get("b").unwrap() /*Data::nil()*/,],
       Data::Integer(5),
-      l![
-        vm.symbols.get("c").unwrap(),
-        vm.symbols.get("d").unwrap(),
-      ],
+      l![vm.symbols.get("c").unwrap(), vm.symbols.get("d").unwrap(),],
     ];
     assert_eq!(expected, actual);
   }
@@ -241,10 +242,7 @@ mod tests {
     let actual = parse_str!(vm, "(a (b c) . d)");
     let expected = vec![dl![
       vm.symbols.get("a").unwrap(),
-      l![
-        vm.symbols.get("b").unwrap(),
-        vm.symbols.get("c").unwrap(),
-      ],
+      l![vm.symbols.get("b").unwrap(), vm.symbols.get("c").unwrap(),],
       vm.symbols.get("d").unwrap(),
     ]];
     assert_eq!(expected, actual);
