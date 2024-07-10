@@ -51,7 +51,22 @@ impl VM {
             return Ok(DataCell::new_info(Data::nil(), head_info));
           } else {
             let data = if dotted {
-              Data::dotted_list(list)
+              // unroll dotted list ending with another list (or nil)
+              if list.back().map(|e| e.has_nil()).unwrap_or(false) {
+                let _ = list.pop_back();
+                Data::list(list)
+              } else if list.back().map(|e| e.has_list()).unwrap_or(false) {
+                let last = list.pop_back().unwrap();
+                let Data::List { list: ref inner_list, .. } = last.data else {
+                  unreachable!();
+                };
+                for elem in inner_list.borrow().iter().cloned() {
+                  list.push_back(elem)
+                }
+                Data::list(list)
+              } else {
+                Data::dotted_list(list)
+              }
             } else {
               Data::list(list)
             };

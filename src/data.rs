@@ -50,6 +50,13 @@ impl DataCell {
       _ => false,
     }
   }
+
+  pub fn has_nil(&self) -> bool {
+    match self.data {
+      Data::Nil { .. } => true,
+      _ => false,
+    }
+  }
 }
 
 #[derive(Clone, Debug, Finalize, Trace)]
