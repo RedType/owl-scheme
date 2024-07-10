@@ -46,26 +46,16 @@ impl VM {
           lexemes.next();
         },
         Some(LexItem(Lexeme::RParen, _)) => {
-          /* no longer ending lists with nil--assume its presence.
-           * this means that the dot lexeme is now meaningless,
-           * which is fine
-           *
-          // end list with nil (if it isn't already nil)
-          if !dotted && !list.is_empty() {
-            list.push_back(Gc::new(GcCell::new(Data::nil())));
-          }
-          */
           lexemes.next();
           if list.is_empty() {
-            return Ok(DataCell::new_info(
-              Data::nil(),
-              head_info,
-            ));
+            return Ok(DataCell::new_info(Data::nil(), head_info));
           } else {
-            return Ok(DataCell::new_info(
-              Data::List(GcCell::new(list)),
-              head_info,
-            ));
+            let data = if dotted {
+              Data::dotted_list(list)
+            } else {
+              Data::list(list)
+            };
+            return Ok(DataCell::new_info(data, head_info));
           }
         },
         _ => {
@@ -96,6 +86,9 @@ impl VM {
     let data = match lexemes.next() {
       Some(LexItem(Lexeme::Dot, info)) => {
         panic!("Illegal dot location {:?}", info)
+      },
+      Some(LexItem(Lexeme::Placeholder, info)) => {
+        DataCell::new_info(Data::Placeholder, info)
       },
       Some(LexItem(Lexeme::Symbol(x), info)) => DataCell::new_info(x, info),
       Some(LexItem(Lexeme::Boolean(x), info)) => {
@@ -129,15 +122,10 @@ impl VM {
           ));
         }
         DataCell::new_info(
-          Data::List(GcCell::new(
-            [
-              DataCell::new_info(self.symbols.add("quote"), info.clone()),
-              self.parse_rec(lexemes)?,
-              // no longer ending lists with nil
-              //Gc::new(GcCell::new(Data::nil())),
-            ]
-            .into(),
-          )),
+          Data::list([
+            DataCell::new_info(self.symbols.add("quote"), info.clone()),
+            self.parse_rec(lexemes)?,
+          ]),
           info,
         )
       },
@@ -156,11 +144,16 @@ mod tests {
     error::{ParseError, SourceInfo},
     vm::VM,
   };
-  use gc::GcCell;
 
   macro_rules! l {
     [$($x:expr),+$(,)?] => {
-      Data::List(GcCell::new([$(DataCell::new_info($x, SourceInfo::blank())),+].into()))
+      Data::list([$(DataCell::new_info($x, SourceInfo::blank())),+])
+    }
+  }
+
+  macro_rules! dl {
+    [$($x:expr),+$(,)?] => {
+      Data::dotted_list([$(DataCell::new_info($x, SourceInfo::blank())),+])
     }
   }
 
@@ -207,7 +200,6 @@ mod tests {
       vm.symbols.get("b").unwrap(),
       vm.symbols.get("c").unwrap(),
       vm.symbols.get("d").unwrap(),
-      //Data::nil(),
     ]];
     assert_eq!(expected, actual);
   }
@@ -223,7 +215,6 @@ mod tests {
       l![
         vm.symbols.get("c").unwrap(),
         vm.symbols.get("d").unwrap(),
-        //Data::nil(),
       ],
     ];
     assert_eq!(expected, actual);
@@ -233,12 +224,11 @@ mod tests {
   fn parse_deep_list() {
     let mut vm = VM::no_std();
     let actual = parse_str!(vm, "(a (b c) . d)");
-    let expected = vec![l![
+    let expected = vec![dl![
       vm.symbols.get("a").unwrap(),
       l![
         vm.symbols.get("b").unwrap(),
         vm.symbols.get("c").unwrap(),
-        //Data::nil(),
       ],
       vm.symbols.get("d").unwrap(),
     ]];
@@ -254,7 +244,6 @@ mod tests {
       l![
         vm.symbols.get("quote").unwrap(),
         vm.symbols.get("b").unwrap(),
-        //Data::nil(),
       ],
       l![
         vm.symbols.get("quote").unwrap(),
@@ -262,14 +251,10 @@ mod tests {
           l![
             vm.symbols.get("quote").unwrap(),
             vm.symbols.get("c").unwrap(),
-            //Data::nil(),
           ],
           vm.symbols.get("d").unwrap(),
-          //Data::nil(),
         ],
-        //Data::nil(),
       ],
-      //Data::nil(),
     ]];
     assert_eq!(expected, actual);
   }
