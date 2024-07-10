@@ -56,10 +56,17 @@ impl VM {
           }
           */
           lexemes.next();
-          return Ok(DataCell::new_info(
-            Data::List(GcCell::new(list)),
-            head_info,
-          ));
+          if list.is_empty() {
+            return Ok(DataCell::new_info(
+              Data::nil(),
+              head_info,
+            ));
+          } else {
+            return Ok(DataCell::new_info(
+              Data::List(GcCell::new(list)),
+              head_info,
+            ));
+          }
         },
         _ => {
           let next_data = self.parse_rec(lexemes)?;

@@ -3,7 +3,11 @@ use crate::{
   error::{ArithmeticError, UnspecifiedError},
   vm::VM,
 };
-use std::f64::consts;
+use gc::GcCell;
+use std::{
+  f64::consts,
+  io::{self, Write},
+};
 
 pub fn import_std(vm: &mut VM) {
   use Data::*;
@@ -53,6 +57,58 @@ pub fn import_std(vm: &mut VM) {
   }
 
   // functions
+  vm.def_builtin("OvO", 0, |_, _| {
+    // auto-format whyyyyy ;A;
+    const OWL: &'static str = concat!(
+      "() ()  meow!\n",
+      "(OvO) /     \n",
+      "(| |)       \n",
+      " ^ ^        ",);
+    Ok(String(GcCell::new(OWL.to_string())))
+  });
+
+  vm.def_builtin("OwO", 0, |_, _| {
+    const LUGIA: &'static str = concat!(
+      "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢻⣦⣄⠀⠀⡄⠀⠀⠀⠀⠀⠀⠀⠀⠀\n",
+      "⠀⠀⠀⠀⠀⠀⠀⠀⠀⢤⠄⣸⣿⣿⣷⡔⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\n",
+      "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢣⡀⠈⠻⢿⣿⠇⠀⠀⠀⠀⠀⠀⠀⠀⠀\n",
+      "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣾⣿⣦⣵⡤⢿⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀\n",
+      "⠀⠀⠀⠀⠀⠀⠀⣷⣄⢠⣿⣿⡟⠻⠇⣠⡾⠀⠀⠀⢠⡀⠀⠀⠀⠀\n",
+      "⠀⠀⠀⠀⠀⠀⠀⣌⡛⣟⣿⣿⣧⣬⣛⢩⣴⠆⠀⠀⢸⣇⢠⣤⠀⠀\n",
+      "⠀⠀⠀⠀⠀⠀⠀⣩⣾⣿⣿⣿⣿⣿⣿⣷⣴⡛⠀⠀⢀⣾⠘⠁⠀⠀\n",
+      "⠀⠀⠀⠀⠀⣠⣾⣿⠟⢻⢿⣿⣿⠋⠉⠉⢿⣿⣷⣔⢿⠇⠀⠀⠀⠀\n",
+      "⠀⠀⠀⢀⣼⣿⣿⠏⠀⡀⠀⠈⠁⠀⠀⠀⣠⡹⣿⣿⣷⣄⠀⠀⠀⠀\n",
+      "⠀⠀⣠⣿⣿⣿⡟⠀⠀⢿⣄⠀⠀⠀⠀⠴⢿⡷⢹⣿⣿⣿⣷⡄⠀⠀\n",
+      "⠀⢰⣿⣿⣿⣿⡇⠀⠀⠀⠉⣿⡎⠉⠛⠛⠻⠿⢈⣿⣿⣿⣿⣿⡄⠀\n",
+      "⠀⣿⣿⣿⣿⣿⣷⡀⠀⠀⠀⠁⠀⠀⠀⠀⠀⠀⣸⣿⣿⣿⣿⣿⣷⠀\n",
+      "⡀⣿⣿⡟⣿⡏⢻⡿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠰⢿⠃⣿⣿⢿⣿⣿⠚\n",
+      "⠀⠿⣿⡇⢻⣿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣿⡿⠸⠿⠈⠀\n",
+      "⠀⠀⠈⠁⠈⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀",
+    );
+    Ok(String(GcCell::new(LUGIA.to_string())))
+  });
+
+  vm.def_builtin("print", 1, |_, args| {
+    for arg in args {
+      print!("{}", arg.data);
+    }
+    io::stdout().flush()?;
+    Ok(Data::Nil { print: false })
+  });
+
+  vm.def_builtin("println", 1, |_, args| {
+    for arg in args {
+      print!("{}", arg.data);
+    }
+    println!();
+    Ok(Data::Nil { print: false })
+  });
+
+  vm.def_builtin("null?", 1, |_, args| {
+    let res = args.iter().fold(true, |a, x| a && x.data.is_nil());
+    Ok(Boolean(res))
+  });
+
   vm.def_builtin("number?", 1, |_, args| {
     let res = args.iter().fold(true, |a, x| {
       a && match x.data {

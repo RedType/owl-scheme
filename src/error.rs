@@ -126,13 +126,13 @@ impl fmt::Display for ArithmeticError {
 
 #[derive(Debug, Error)]
 pub enum EvalError {
-  EmptyListEvaluation,
   InvalidSpecialForm,
   InvalidLambdaName,
   InvalidParameter,
   InvalidParameterList,
   InvalidArgumentList,
   IOError(io::Error),
+  NilEvaluation,
   NonBooleanTest,
   NonFunctionApplication(Data),
   TooManyArguments,
@@ -144,7 +144,6 @@ impl fmt::Display for EvalError {
     use EvalError::*;
 
     match *self {
-      EmptyListEvaluation => write!(f, "empty list is not evaluable"),
       InvalidSpecialForm => {
         write!(f, "incorrect number of arguments given for special form")
       },
@@ -157,6 +156,7 @@ impl fmt::Display for EvalError {
         write!(f, "expression must be a list of arguments")
       },
       IOError(ref e) => write!(f, "{}", e),
+      NilEvaluation => write!(f, "empty list (nil) is not evaluable"),
       NonBooleanTest => write!(f, "non-boolean expression in conditional"),
       NonFunctionApplication(_) => {
         write!(f, "non-function values cannot be applied")

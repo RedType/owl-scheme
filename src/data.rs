@@ -8,6 +8,8 @@ use std::{
   collections::{HashMap, HashSet, VecDeque},
   error::Error,
   fmt,
+  hash::{DefaultHasher, Hash, Hasher},
+  ptr,
   rc::Rc,
 };
 
@@ -45,11 +47,13 @@ impl DataCell {
 
 #[derive(Clone, Debug, Finalize, Trace)]
 pub enum Data {
+  Nil {
+    print: bool,
+  },
   List(GcCell<VecDeque<Gc<DataCell>>>),
   Symbol(Rc<str>),
   String(GcCell<String>),
   Boolean(bool),
-  // first element is the fn name
   Builtin {
     name: Rc<str>,
     parameters: usize,
@@ -72,11 +76,13 @@ pub enum Data {
 
 impl Data {
   pub fn nil() -> Data {
-    Self::List(GcCell::new(VecDeque::new()))
+    Self::Nil { print: true }
   }
 
   pub fn is_nil(&self) -> bool {
-    if let Self::List(xs) = self {
+    if let Self::Nil { .. } = self {
+      true
+    } else if let Self::List(xs) = self {
       xs.borrow().is_empty()
     } else {
       false
@@ -99,6 +105,8 @@ impl PartialEq for Data {
     use Data::*;
 
     match (self, other) {
+      (Nil { .. }, Nil { .. }) => true,
+      (Nil { .. }, data) | (data, Nil { .. }) => data.is_nil(),
       (List(l), List(r)) => {
         if l.borrow().len() != r.borrow().len() {
           false
@@ -126,6 +134,94 @@ impl PartialEq for Data {
       },
       (Real(l), Real(r)) => (l - r).abs() < 0.0000001,
       _ => false,
+    }
+  }
+}
+
+impl fmt::Display for Data {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    use Data::*;
+
+    match self {
+      Nil { print: true } => write!(f, "()"),
+      Nil { print: false } => Ok(()),
+
+      List(xs) => {
+        let borrow = xs.borrow();
+        let mut iter = borrow.iter().peekable();
+        let mut first = true;
+
+        write!(f, "(")?;
+        while let Some(x) = iter.next() {
+          //let last = iter.peek().is_none();
+          // write leading space
+          if first {
+            first = false;
+          } else {
+            write!(f, " ")?;
+          }
+
+          let _ = &x.data.fmt(f)?;
+          /* no longer using nil to end lists
+          // check to see if we're at the end
+          // if so, print a dot for non-nil and print nothing for nil
+          // otherwise just print the element
+          if !last {
+            self.display_data_rec(f, &x.data);
+          }
+          else if !x.data.is_nil() {
+            write!(f, " . ").unwrap();
+            self.display_data_rec(f, &x.data);
+          }
+          */
+        }
+        write!(f, ")")
+      },
+      Symbol(name) => write!(f, "{}", name),
+      String(x) => write!(f, "\"{}\"", x.borrow()),
+      Boolean(x) => write!(f, "{}", if *x { "#true" } else { "#false" }),
+      Complex(r, i) => {
+        if *i == 0.0 {
+          write!(f, "{}", r)
+        } else if *r == 0.0 {
+          write!(f, "{}i", i)
+        } else {
+          write!(f, "{}{:+}i", r, i)
+        }
+      },
+      Real(x) => write!(f, "{}", x),
+      Rational(n, d) => {
+        if *d == 1 {
+          write!(f, "{}", n)
+        } else if *n == 0 {
+          write!(f, "0")
+        } else {
+          write!(f, "{}/{}", n, d)
+        }
+      },
+      Integer(x) => write!(f, "{}", x),
+      Builtin { name, .. } => write!(f, "<builtin fn {}>", name),
+      Procedure {
+        name,
+        parameters,
+        arguments,
+        code,
+      } => {
+        let mut hasher = DefaultHasher::new();
+        for param in parameters {
+          param.hash(&mut hasher);
+        }
+        for arg in arguments {
+          ptr::hash(arg, &mut hasher);
+        }
+        ptr::hash(code, &mut hasher);
+        let hash = hasher.finish() % 16u64.pow(6);
+        if let Some(name) = name {
+          write!(f, "<procedure {} {:x}>", name, hash)
+        } else {
+          write!(f, "<procedure {:x}>", hash)
+        }
+      },
     }
   }
 }
@@ -244,6 +340,84 @@ mod tests {
     let asdf = table.add("asdf");
 
     assert_eq!(table.get("asdf").unwrap(), asdf);
+  }
+
+  #[test]
+  fn display_data() {
+    use Data::*;
+
+    let mut vm = VM::no_std();
+
+    let symbol = vm.symbols.add("jeremy");
+    assert_eq!(symbol.to_string(), "jeremy".to_owned());
+
+    let string = String(GcCell::new("upright bass".to_owned()));
+    assert_eq!(string.to_string(), "\"upright bass\"");
+
+    let tru = Boolean(true);
+    let fals = Boolean(false);
+    assert_eq!(tru.to_string(), "#true");
+    assert_eq!(fals.to_string(), "#false");
+
+    let int = Integer(35);
+    assert_eq!(int.to_string(), "35");
+
+    let float = Real(123.4);
+    assert_eq!(float.to_string(), "123.4");
+
+    let nil = Data::nil();
+    assert_eq!(nil.to_string(), "()");
+
+    let list = List(GcCell::new(
+      [symbol, string, tru, fals, int, float]
+        .into_iter()
+        .map(|e| DataCell::new_info(e, SourceInfo::blank()))
+        .collect::<VecDeque<_>>(),
+    ));
+    assert_eq!(
+      list.to_string(),
+      "(jeremy \"upright bass\" #true #false 35 123.4)"
+    );
+
+    let dotted = List(GcCell::new(
+      [
+        Real(12.0),
+        String(GcCell::new("oy".into())),
+        Data::nil(),
+        Real(0.23456),
+      ]
+      .into_iter()
+      .map(|e| DataCell::new_info(e, SourceInfo::blank()))
+      .collect::<VecDeque<_>>(),
+    ));
+    // no longer printing dots
+    assert_eq!(dotted.to_string(), "(12 \"oy\" () 0.23456)");
+  }
+
+  #[test]
+  fn display_numbers() {
+    use Data::*;
+
+    let complex = Complex(123.4, 5.0);
+    assert_eq!(complex.to_string(), "123.4+5i");
+
+    let complex2 = Complex(123.4, -5.0);
+    assert_eq!(complex2.to_string(), "123.4-5i");
+
+    let complex3 = Complex(0.0, -5.0);
+    assert_eq!(complex3.to_string(), "-5i");
+
+    let complex4 = Complex(1.1, 0.0);
+    assert_eq!(complex4.to_string(), "1.1");
+
+    let rational = Rational(-3, 4);
+    assert_eq!(rational.to_string(), "-3/4");
+
+    let rational2 = Rational(0, 4);
+    assert_eq!(rational2.to_string(), "0");
+
+    let rational3 = Rational(4, 1);
+    assert_eq!(rational3.to_string(), "4");
   }
 
   macro_rules! gcdata {

@@ -11,9 +11,7 @@ use std::{
   collections::HashMap,
   fmt::Write,
   fs::File,
-  hash::{DefaultHasher, Hash, Hasher},
   io::Read,
-  ptr,
   rc::Rc,
 };
 
@@ -139,96 +137,6 @@ impl VM {
     }
   }
 
-  pub fn display_data(&mut self, d: &Data) -> String {
-    let mut output = String::new();
-    self.display_data_rec(&mut output, d);
-    output
-  }
-
-  fn display_data_rec(&mut self, f: &mut String, d: &Data) {
-    use Data::*;
-
-    match d {
-      List(xs) => {
-        let borrow = xs.borrow();
-        let mut iter = borrow.iter().peekable();
-        let mut first = true;
-
-        write!(f, "(").unwrap();
-        while let Some(x) = iter.next() {
-          //let last = iter.peek().is_none();
-          // write leading space
-          if first {
-            first = false;
-          } else {
-            write!(f, " ").unwrap();
-          }
-
-          self.display_data_rec(f, &x.data);
-          /* no longer using nil to end lists
-          // check to see if we're at the end
-          // if so, print a dot for non-nil and print nothing for nil
-          // otherwise just print the element
-          if !last {
-            self.display_data_rec(f, &x.data);
-          }
-          else if !x.data.is_nil() {
-            write!(f, " . ").unwrap();
-            self.display_data_rec(f, &x.data);
-          }
-          */
-        }
-        write!(f, ")")
-      },
-      Symbol(name) => write!(f, "{}", name),
-      String(x) => write!(f, "\"{}\"", x.borrow()),
-      Boolean(x) => write!(f, "{}", if *x { "#true" } else { "#false" }),
-      Complex(r, i) => {
-        if *i == 0.0 {
-          write!(f, "{}", *r)
-        } else if *r == 0.0 {
-          write!(f, "{}i", *i)
-        } else {
-          write!(f, "{}{:+}i", *r, *i)
-        }
-      },
-      Real(x) => write!(f, "{}", x),
-      Rational(n, d) => {
-        if *d == 1 {
-          write!(f, "{}", *n)
-        } else if *n == 0 {
-          write!(f, "0")
-        } else {
-          write!(f, "{}/{}", *n, *d)
-        }
-      },
-      Integer(x) => write!(f, "{}", x),
-      Builtin { name, .. } => write!(f, "<builtin fn {}>", name),
-      Procedure {
-        name,
-        parameters,
-        arguments,
-        code,
-      } => {
-        let mut hasher = DefaultHasher::new();
-        for param in parameters {
-          param.hash(&mut hasher);
-        }
-        for arg in arguments {
-          ptr::hash(arg, &mut hasher);
-        }
-        ptr::hash(code, &mut hasher);
-        let hash = hasher.finish() % 16u64.pow(6);
-        if let Some(name) = name {
-          write!(f, "<procedure {} {:x}>", name, hash)
-        } else {
-          write!(f, "<procedure {:x}>", hash)
-        }
-      },
-    }
-    .unwrap();
-  }
-
   pub fn eval_str<S: AsRef<str>>(
     &mut self,
     source: S,
@@ -251,6 +159,10 @@ impl VM {
     use Data::*;
 
     match expr.data {
+      Nil { .. } => Err(VMError::new(
+        EvalError::NilEvaluation,
+        expr.info.clone(),
+      )),
       // self-evaluating expressions
       Boolean(_)
       | String(_)
@@ -270,7 +182,7 @@ impl VM {
       // function application & special forms
       List(ref exps) => match exps.borrow().front().as_ref() {
         None => Err(VMError::new(
-          EvalError::EmptyListEvaluation,
+          EvalError::NilEvaluation,
           expr.info.clone(),
         )),
         Some(head) => match head.data {
@@ -639,93 +551,7 @@ impl VM {
 
 #[cfg(test)]
 mod tests {
-  use crate::{
-    data::{Data, DataCell},
-    error::SourceInfo,
-    vm::VM,
-  };
-  use gc::GcCell;
-  use std::collections::VecDeque;
-
-  #[test]
-  fn display_data() {
-    use Data::*;
-
-    let mut vm = VM::no_std();
-
-    let symbol = vm.symbols.add("jeremy");
-    assert_eq!(vm.display_data(&symbol), "jeremy".to_owned());
-
-    let string = String(GcCell::new("upright bass".to_owned()));
-    assert_eq!(vm.display_data(&string), "\"upright bass\"");
-
-    let tru = Boolean(true);
-    let fals = Boolean(false);
-    assert_eq!(vm.display_data(&tru), "#true");
-    assert_eq!(vm.display_data(&fals), "#false");
-
-    let int = Integer(35);
-    assert_eq!(vm.display_data(&int), "35");
-
-    let float = Real(123.4);
-    assert_eq!(vm.display_data(&float), "123.4");
-
-    let nil = Data::nil();
-    assert_eq!(vm.display_data(&nil), "()");
-
-    let list = List(GcCell::new(
-      [symbol, string, tru, fals, int, float]
-        .into_iter()
-        .map(|e| DataCell::new_info(e, SourceInfo::blank()))
-        .collect::<VecDeque<_>>(),
-    ));
-    assert_eq!(
-      vm.display_data(&list),
-      "(jeremy \"upright bass\" #true #false 35 123.4)"
-    );
-
-    let dotted = List(GcCell::new(
-      [
-        Real(12.0),
-        String(GcCell::new("oy".into())),
-        Data::nil(),
-        Real(0.23456),
-      ]
-      .into_iter()
-      .map(|e| DataCell::new_info(e, SourceInfo::blank()))
-      .collect::<VecDeque<_>>(),
-    ));
-    // no longer printing dots
-    assert_eq!(vm.display_data(&dotted), "(12 \"oy\" () 0.23456)");
-  }
-
-  #[test]
-  fn display_numbers() {
-    use Data::*;
-
-    let mut vm = VM::no_std();
-
-    let complex = Complex(123.4, 5.0);
-    assert_eq!(vm.display_data(&complex), "123.4+5i");
-
-    let complex2 = Complex(123.4, -5.0);
-    assert_eq!(vm.display_data(&complex2), "123.4-5i");
-
-    let complex3 = Complex(0.0, -5.0);
-    assert_eq!(vm.display_data(&complex3), "-5i");
-
-    let complex4 = Complex(1.1, 0.0);
-    assert_eq!(vm.display_data(&complex4), "1.1");
-
-    let rational = Rational(-3, 4);
-    assert_eq!(vm.display_data(&rational), "-3/4");
-
-    let rational2 = Rational(0, 4);
-    assert_eq!(vm.display_data(&rational2), "0");
-
-    let rational3 = Rational(4, 1);
-    assert_eq!(vm.display_data(&rational3), "4");
-  }
+  use crate::vm::VM;
 
   #[test]
   fn factorize() {
