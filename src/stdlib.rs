@@ -3,7 +3,6 @@ use crate::{
   error::{ArithmeticError, UnspecifiedError},
   vm::VM,
 };
-use gc::GcCell;
 use std::{
   f64::consts,
   io::{self, Write},
@@ -65,7 +64,8 @@ pub fn import_std(vm: &mut VM) {
       "(| |)       \n",
       " ^ ^        ",
     );
-    Ok(String(GcCell::new(OWL.to_string())))
+    println!("{}", OWL);
+    Ok(Nil { print: false })
   });
 
   vm.def_builtin("OwO", 0, false, |_, _| {
@@ -86,7 +86,8 @@ pub fn import_std(vm: &mut VM) {
       "⠀⠿⣿⡇⢻⣿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣿⡿⠸⠿⠈⠀\n",
       "⠀⠀⠈⠁⠈⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀",
     );
-    Ok(String(GcCell::new(LUGIA.to_string())))
+    println!("{}", LUGIA);
+    Ok(Nil { print: false })
   });
 
   vm.def_builtin("print", 1, true, |_, args| {
@@ -94,7 +95,7 @@ pub fn import_std(vm: &mut VM) {
       print!("{}", arg.data);
     }
     io::stdout().flush()?;
-    Ok(Data::Nil { print: false })
+    Ok(Nil { print: false })
   });
 
   vm.def_builtin("println", 1, true, |_, args| {
